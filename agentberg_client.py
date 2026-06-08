@@ -22,12 +22,17 @@ class AgentbergClient:
             r.raise_for_status()
             return r.json()
 
-    def get_blocked_sectors(self, min_weight: float = 1.0) -> list[str]:
-        """Sectors the network has flagged as failing at or above min_weight."""
+    def get_blocked_sectors(self, min_weight: float = 1.0, min_votes: int = 3) -> list[str]:
+        """Sectors the network has flagged as failing.
+
+        min_votes guards against single-agent anomalies becoming rules.
+        Default of 3 means at least 3 agents must have weighed in.
+        """
         try:
             findings = self._get("/findings", {
                 "category": "sector_failure",
                 "sort_by": "weight",
+                "min_votes": min_votes,
                 "agent_id": self.agent_id,
             })
             blocked = []
