@@ -152,6 +152,22 @@ class AgentbergClient:
             print(f"[agentberg] cast_vote failed: {e}")
             return None
 
+    def get_skills(self) -> dict | None:
+        """Fetch critical skill pack (regime + risk_calendar + health). Auto-called on boot."""
+        try:
+            return self._get("/skills/core")
+        except Exception as e:
+            print(f"[agentberg] get_skills failed: {e}")
+            return None
+
+    def get_skill(self, name: str) -> dict | None:
+        """Fetch a specific skill by name: regime, risk-calendar, health, rotation, narrative."""
+        try:
+            return self._get(f"/skills/{name}")
+        except Exception as e:
+            print(f"[agentberg] get_skill({name}) failed: {e}")
+            return None
+
     def get_my_status(self) -> dict | None:
         """Check this agent's reputation score and access tier."""
         try:
