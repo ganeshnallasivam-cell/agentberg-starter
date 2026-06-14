@@ -1,62 +1,43 @@
 """
-llm.py — Claude ranking layer via Claude Code CLI.
+llm.py — provider-agnostic AI ranking layer.
 
-Requires Claude Code CLI installed: claude.ai/code
-No API key needed — uses your Claude subscription.
+One ranking entry point and one shared prompt; the provider-specific call lives in a
+small adapter under llm_providers/. This is the only place the kit differs by AI
+provider — everything else is identical, so there is one kit, not one per model.
 
-If `claude` CLI is not found, falls back to rule-based ranking automatically.
+Choose a provider with LLM_PROVIDER:
+
+    LLM_PROVIDER=auto       (default) use the first available adapter
+    LLM_PROVIDER=claude     Claude Code CLI   (`claude`, no API key)
+    LLM_PROVIDER=gemini     Antigravity CLI   (`agy`,    no API key)
+    LLM_PROVIDER=openai     Codex CLI         (`codex`,  no API key)
+    LLM_PROVIDER=deepseek   DeepSeek API      (DEEPSEEK_API_KEY)
+
+    LLM_REASONING=off       skip AI ranking entirely (rule-based only)
+    LLM_MODEL=...           override the chosen provider's model
+
+If the chosen provider is missing or unconfigured, ranking falls back to the
+rule-based candidate list — the agent keeps trading either way.
 """
 
-import character
 import json
 import os
-import shutil
-import subprocess
+
+import character
+from llm_providers import claude, deepseek, gemini, openai
+
+_ADAPTERS = {
+    "claude":   claude,
+    "gemini":   gemini,
+    "openai":   openai,
+    "deepseek": deepseek,
+}
+# Order tried when LLM_PROVIDER=auto: local CLIs (no key) first, API last.
+_AUTO_ORDER = ["claude", "gemini", "openai", "deepseek"]
 
 
-def _find_claude() -> str | None:
-    p = shutil.which("claude")
-    if p:
-        return p
-    for d in ("/usr/local/bin", "/opt/homebrew/bin", os.path.expanduser("~/.local/bin")):
-        fp = os.path.join(d, "claude")
-        if os.path.isfile(fp) and os.access(fp, os.X_OK):
-            return fp
-    return None
-
-
-def _parse_json(raw: str) -> list:
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    start = raw.find("[")
-    end   = raw.rfind("]") + 1
-    if start >= 0 and end > start:
-        return json.loads(raw[start:end])
-    return json.loads(raw)
-
-
-def rank_candidates(
-    candidates: list[dict],
-    regime: str,
-    risk_level: str,
-    health_label: str,
-    blocked_sectors: list[str],
-) -> list[dict]:
-    """
-    Ask Claude to review candidates. Falls back to rule-based if CLI not found.
-    """
-    if not candidates:
-        return candidates
-
-    claude = _find_claude()
-    if not claude:
-        print("    [claude] CLI not found — rule-based fallback (install at claude.ai/code)")
-        return candidates
-
-    prompt = f"""You are a disciplined trading agent reviewing candidates.
+def _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors) -> str:
+    return f"""You are a disciplined trading agent reviewing candidates.
 
 Market context:
 - Regime: {regime or "unknown"}
@@ -76,23 +57,76 @@ Prefer stronger moves and sectors with tailwinds.
 
 Return a JSON array of candidates to TRADE, priority order.
 Each object: ticker, sector, direction, price, day_change, reason (one sentence).
-JSON only — no text outside the array."""
+JSON only — no text, no markdown, no code fences outside the array."""
 
+
+def _extract_json_array(text: str):
+    """Pull the first JSON array out of raw model output (tolerant of extra prose)."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.lstrip().startswith("json"):
+            text = text.lstrip()[4:]
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end < start:
+        return None
+    return text[start:end + 1]
+
+
+def _select_adapter():
+    """Resolve LLM_PROVIDER to an available adapter, or None for rule-based fallback."""
+    choice = os.environ.get("LLM_PROVIDER", "auto").lower()
+    if choice != "auto":
+        adapter = _ADAPTERS.get(choice)
+        if adapter is None:
+            print(f"    [llm] unknown LLM_PROVIDER '{choice}' — rule-based fallback")
+            return None
+        if not adapter.available():
+            print(f"    [{adapter.NAME}] not available — rule-based fallback (see README.md)")
+            return None
+        return adapter
+    for name in _AUTO_ORDER:
+        adapter = _ADAPTERS[name]
+        if adapter.available():
+            return adapter
+    print("    [llm] no AI provider available — rule-based fallback (see README.md)")
+    return None
+
+
+def rank_candidates(
+    candidates: list[dict],
+    regime: str,
+    risk_level: str,
+    health_label: str,
+    blocked_sectors: list[str],
+) -> list[dict]:
+    """
+    Ask the configured AI provider to review candidates and return only the ones worth
+    trading. Falls back to the original list if no provider is available or output is
+    unparseable — the agent always keeps trading.
+    """
+    if not candidates:
+        return candidates
+    if os.environ.get("LLM_REASONING", "").lower() == "off":
+        return candidates
+
+    adapter = _select_adapter()
+    if adapter is None:
+        return candidates
+
+    prompt = _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors)
     try:
-        result = subprocess.run(
-            [claude, "-p", "-"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr[:100])
-        ranked = _parse_json(result.stdout)
-        print(f"    [claude] {len(candidates)} → {len(ranked)} candidate(s)")
+        raw = adapter.run(prompt)
+        payload = _extract_json_array(raw)
+        if payload is None:
+            print(f"    [{adapter.NAME}] no JSON in output — rule-based fallback")
+            return candidates
+        ranked = json.loads(payload)
+        print(f"    [{adapter.NAME}] {len(candidates)} → {len(ranked)} candidate(s)")
         for c in ranked:
-            print(f"    [claude] TRADE {c['ticker']}: {c.get('reason', '')}")
+            print(f"    [{adapter.NAME}] TRADE {c.get('ticker', '?')}: {c.get('reason', '')}")
         return ranked
     except Exception as e:
-        print(f"    [claude] unavailable ({e}) — rule-based fallback")
+        print(f"    [{adapter.NAME}] unavailable ({e}) — rule-based fallback")
         return candidates

@@ -16,8 +16,17 @@ python setup.py               # onboard your agent's character (goals, risk, wat
 ```
 
 - **Alpaca paper keys** (free): [alpaca.markets](https://alpaca.markets)
-- **AI ranking** uses a local AI CLI if present (`agy` / `ali` / `claude`); with none, it
-  falls back to a free momentum ranking. No API key required.
+- **AI ranking — one kit, any provider.** Pick one with `LLM_PROVIDER` (or leave it on
+  `auto` to use whichever is installed). Missing/unconfigured → free rule-based ranking.
+
+  | `LLM_PROVIDER` | Backend | Setup |
+  |---|---|---|
+  | `claude` | Claude Code CLI (`claude`) | install [claude.ai/code](https://claude.ai/code) — no API key |
+  | `gemini` | Antigravity CLI (`agy`) | install `agy`, then `agy` sign-in — no API key |
+  | `openai` | Codex CLI (`codex`) | install `codex`, then sign in — no API key |
+  | `deepseek` | DeepSeek API | `pip install openai`, set `DEEPSEEK_API_KEY` ([free key](https://platform.deepseek.com)) |
+
+  Optional: `LLM_MODEL` overrides the model; `LLM_REASONING=off` skips AI ranking entirely.
 
 ## Run
 
