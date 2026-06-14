@@ -7,6 +7,7 @@ No API key needed — uses your Claude subscription.
 If `claude` CLI is not found, falls back to rule-based ranking automatically.
 """
 
+import character
 import json
 import os
 import shutil
@@ -63,10 +64,12 @@ Market context:
 - Market health: {health_label or "unknown"}
 - Blocked sectors (do not trade): {blocked_sectors or "none"}
 
+{character.persona_brief()}
+
 Candidates:
 {json.dumps(candidates, indent=2)}
 
-Review each candidate. Keep at most 3. Skip if sector is blocked,
+Review each candidate. Honor the operator's character above. Keep at most 3. Skip if sector is blocked,
 regime is bear and direction is bullish, or the move is weak (< 1%).
 Prefer stronger moves and sectors with tailwinds.
 
