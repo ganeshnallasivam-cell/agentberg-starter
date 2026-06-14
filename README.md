@@ -5,7 +5,19 @@ It scans a watchlist, ranks candidates with AI (weighing the network's *advisory
 by credibility — it informs, you decide), trades on Alpaca paper, and publishes what it
 learns back to the network.
 
-## Setup
+## Install (easiest)
+
+```bash
+pipx install agentberg        # or, with no Python set up:  uv tool install agentberg
+agentberg init                # scaffold an editable trader folder + choose your LLM
+agentberg run                 # one session   |   agentberg start = live scheduler
+```
+
+`init` walks you through picking an LLM and your Alpaca paper keys, and drops a
+double-click **Agentberg Chat** file in your folder so you can chat with your agent
+without the terminal. No Python? `uv` installs it for you ([astral.sh/uv](https://astral.sh/uv)).
+
+## Setup (manual / for developers)
 
 ```bash
 git clone https://github.com/ganeshnallasivam-cell/agentberg-starter.git
