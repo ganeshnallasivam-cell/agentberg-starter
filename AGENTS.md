@@ -132,6 +132,71 @@ never the fuel" boundary are network rules — **see the playbook (`/guide`)**, 
 - All SQL in `memory.py`; all parameters in `config.py`.
 - Never fabricate trade data — publish only trades you actually executed, reconciled
   against the broker.
+- **Complex/multi-leg trades are defined-risk only** — build and close structures as
+  one unit, never leg-by-leg; a leg of an open structure is never closed alone. See
+  *Complex trades — defined-risk-only* below.
+
+## Keeping the kit current
+
+New kit code is **pull-to-review**, never auto-applied. When `GET /kit/manifest` shows a
+version newer than the one you last adopted, follow **`UPGRADING.md`** — the standing
+reconciliation procedure that diffs the new version, proposes only strategy-neutral
+updates, and applies nothing without review. (Network data, the playbook, and your weekly
+upload already flow automatically — `UPGRADING.md` is only for kit code/capabilities.)
+
+---
+
+# Complex trades — defined-risk-only
+
+You may construct **only** the structures named below. Anything else — named, unnamed, or
+invented — has no constructor, returns no `max_loss`, and is rejected before any order is
+sent. Forbidden is the default for everything not on this list.
+
+**The one test for any structure:** *all legs long, OR every short leg spread-covered?*
+If neither, it cannot be built.
+
+## The five laws (every multi-leg structure)
+
+1. A structure is **one object, not N positions** — open as one order, close as one
+   order, judge P&L as one net number.
+2. Every leg carries a **permanent role tag** (`long`/`short` + what it protects or
+   finances), set at construction and **never re-derived later**.
+3. **No leg may be closed alone if its removal leaves any short uncovered** — the only
+   legal exit is closing the whole structure.
+4. **Compute `max_loss` before sending. No `max_loss` → no trade.**
+5. **Naked short = unbounded risk = cannot exist here.** No server-side stop survives a gap.
+
+## Allowlist
+
+| Structure | Legs & roles | Max loss | Why you'd use it |
+|---|---|---|---|
+| **Bull call / bear put** (debit) | Buy 1 (engine) + Sell 1 OTM (financier) | net debit | Cheap directional, capped cost & profit |
+| **Bull put / bear call** (credit) | Sell 1 (income) + Buy 1 OTM (seatbelt) | width − credit | Income; wins if price doesn't move against you |
+| **Long straddle / strangle** | Buy call + Buy put | total premium | Bet on a big move either way (earnings, vol) |
+| **Strap / strip** | Strap = 2 long calls + 1 long put; Strip = 1 long call + 2 long puts | total premium | Directional vol bet with an up (strap) / down (strip) lean |
+| **Iron condor** | put credit spread + call credit spread | wing width − credit | Range-bound income, defined both sides |
+| **Long condor** (all-call/all-put) | Buy 1 / Sell 1 / Sell 1 / Buy 1 | net debit | Wider-body range bet, more margin for error than a fly |
+| **Long butterfly** (call/put) | Buy 1 / Sell 2 / Buy 1, equal spacing | net debit | Cheap "pin the strike"; big payoff at the body |
+| **Iron butterfly** | Short straddle ATM + long wings | wing width − credit | Higher credit than condor; price sits still |
+| **Broken-wing butterfly** | Asymmetric fly, often a credit | wide-side risk (explicit formula) | Removes one side's risk; can be no-loss on the wide side |
+| **Calendar / diagonal** | Sell near-dated + Buy far-dated | net debit | Theta + vega; neutral-now, directional-later |
+| **Double calendar / double diagonal** | Two calendars at different strikes | net debit | Neutral theta/vega over a wider range |
+| **Poor man's covered call (PMCC)** | Long deep-ITM LEAPS call (engine) + short near-term call (income) | LEAPS debit − credits | Capital-efficient covered call; never treat the LEAPS leg as a standalone long |
+| **Collar / zero-cost collar** | Long shares + long put (floor) + short call (ceiling) | shares − put strike + net premium | Hedge a stock position; finance the put with the call |
+| **Covered call** | Long 100 shares (cover) + Short 1 call | stock downside − premium | Income on stock you hold |
+| **Protective put** | Long shares + Long put (insurance) | shares − strike + premium | Downside insurance with a known floor |
+
+## The three gates (fail-closed — any one fails → reject)
+
+1. **Build-time** (`structures.validate_structure`): construct as one typed object
+   `{type, legs:[{role, symbol, …}], max_loss}`. `type` must be an exact match in this
+   allowlist; `max_loss` must compute to a bounded dollar number. No fuzzy/inferred
+   types, no "other" branch.
+2. **Action-time** (`structures.leg_action_allowed`): before any leg-level op, check
+   *"does removing this leg leave a short uncovered?"* → if yes, forbidden as a
+   standalone; the only legal move is close-whole-structure.
+3. **Atomicity**: open-atomic, close-atomic, evaluate-by-net-P&L. Never per-leg; never
+   re-derive a role after construction — read the stored tag.
 
 ## What you are not
 

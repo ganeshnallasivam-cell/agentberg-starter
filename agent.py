@@ -20,6 +20,7 @@ import config as cfg
 import knowledge
 import memory
 import risk
+import structures
 from agentberg import AgentbergClient
 from alpaca import AlpacaClient
 from llm import rank_candidates
@@ -53,6 +54,47 @@ def _ensure_registered():
         print(f"    [register] id '{confirmed}' is yours")
 
 
+def reconcile_ledger():
+    """
+    Broker is the source of truth — the local ledger is only a cache.
+
+    Bracket/OTO stops fire at Alpaca even when this app is off, and check_positions()
+    only records exits IT performs. So any trade still 'open' locally but no longer
+    held at the broker was closed server-side and never recorded. Left uncorrected,
+    those phantom-open losers silently drop out of the win-rate denominator and we
+    publish inflated findings to the whole network and cast outcome votes from drifted
+    data. Run this BEFORE any publish or vote, every session.
+    """
+    open_trades = memory.get_open_trades()
+    if not open_trades:
+        return
+    held = _alpaca.get_position_symbols()
+    reconciled = 0
+    for t in open_trades:
+        legs = [s for s in (t.get("long_symbol"), t.get("short_symbol")) if s] or [t["symbol"]]
+        if any(s in held for s in legs):
+            continue   # still open at the broker
+
+        long_sym = t.get("long_symbol") or t["symbol"]
+        fill      = _alpaca.get_last_fill(long_sym, side="sell")
+        exit_price = float(fill.get("filled_avg_price") or 0) if fill else 0.0
+        entry = t.get("entry_price") or 0
+        qty   = t.get("qty") or 0
+        mult  = t.get("multiplier") or 1
+        if exit_price and entry:
+            pnl     = (exit_price - entry) * qty * mult
+            pnl_pct = (exit_price - entry) / entry
+        else:
+            pnl, pnl_pct = 0.0, 0.0
+        memory.record_trade_close(
+            t["id"], exit_price=exit_price, pnl=pnl, pnl_pct=pnl_pct,
+            exit_reason="reconciled_broker",
+        )
+        reconciled += 1
+    if reconciled:
+        print(f"[reconcile] Closed {reconciled} trade(s) from broker truth (server-side/offline exits)")
+
+
 def run_session():
     """
     Full trading cycle. Call once at market open and once at close.
@@ -70,6 +112,10 @@ def run_session():
         print(f"    [playbook] Agentberg Playbook v{guide.get('version','?')} loaded — "
               f"the network informs, you decide ({cfg.AGENTBERG_URL}/guide)")
     _ensure_registered()
+
+    # ── Reconcile FIRST — rebuild close state from the broker before any publish/vote
+    print("[reconcile] Syncing local ledger with broker...")
+    reconcile_ledger()
 
     # ── Step 0: Skills — regime, risk calendar, market health ─────────────────
     print("[0] Loading skills...")
@@ -293,10 +339,24 @@ def run_session():
             if not allowed:
                 print(f"    SKIP {ticker} spread: {reason}")
                 continue
+
+            # Build-time gate (structures.py): fail-closed structural check before any
+            # order is sent. Refuses unknown structures or any whose max_loss isn't a
+            # bounded positive number — naked/ratio legs can't get past this.
+            ok, why = structures.validate_structure(
+                "debit_vertical", max_loss=net_debit * 100,
+                legs=[{"role": "long", "symbol": buy_leg["symbol"]},
+                      {"role": "short", "symbol": sell_leg["symbol"]}],
+            )
+            if not ok:
+                print(f"    SKIP {ticker} spread: structure gate — {why}")
+                continue
             try:
                 order    = _alpaca.submit_option_spread(buy_leg["symbol"], sell_leg["symbol"], qty=1, net_debit=net_debit)
                 trade_id = memory.record_trade_open(ticker, sector, net_debit, 1, trade_type=f"{option_type}_spread",
-                                signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct)
+                                signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct,
+                                long_symbol=buy_leg["symbol"], short_symbol=sell_leg["symbol"],
+                                multiplier=100, order_id=order.get("id"))
                 print(f"    SPREAD {ticker} {option_type.upper()} ${float(buy_leg['strike_price']):.0f}/${float(sell_leg['strike_price']):.0f} debit=${net_debit:.2f}")
                 executed.append({**c, "memory_id": trade_id, "net_debit": net_debit})
                 open_count += 1
@@ -353,38 +413,93 @@ def check_positions():
     """
     Stop-loss and take-profit monitor. Called every 5 minutes by scheduler.
     Does NOT open new positions — only closes based on P&L thresholds.
+
+    Spreads are resolved as a unit: a debit spread's two legs are closed together
+    (one mleg order), never per-leg. Closing the long leg alone trips Alpaca's
+    "uncovered contract" reject, and judging the short leg on its own P&L stops out
+    healthy spreads. So we resolve spreads first from the local ledger, then handle
+    whatever single positions remain.
     """
     positions = _alpaca.get_positions()
     if not positions:
         return
+    pos_by_symbol = {p["symbol"]: p for p in positions}
+    handled: set = set()
+    open_trades = memory.get_open_trades()
+    # Action-time gate (structures.py): every symbol that is a leg of an open
+    # multi-leg structure. None of these may be closed standalone (see single loop).
+    structure_legs = structures.open_structure_leg_symbols(open_trades)
 
+    # ── Spreads first (two-leg, closed atomically) ─────────────────────────────
+    for trade in open_trades:
+        long_sym  = trade.get("long_symbol")
+        short_sym = trade.get("short_symbol")
+        if not short_sym:
+            continue   # not a spread
+        long_pos  = pos_by_symbol.get(long_sym)
+        short_pos = pos_by_symbol.get(short_sym)
+        if not long_pos or not short_pos:
+            continue   # legs not both live (reconcile handles vanished spreads)
+
+        qty  = trade.get("qty") or 1
+        mult = trade.get("multiplier") or 100
+        net_pl_dollars = float(long_pos.get("unrealized_pl", 0)) + float(short_pos.get("unrealized_pl", 0))
+        cost_dollars   = (trade.get("entry_price") or 0) * mult * qty
+        net_pct        = (net_pl_dollars / cost_dollars) if cost_dollars else 0.0
+
+        reason = None
+        if net_pct <= -cfg.OPTION_STOP_LOSS_PCT:
+            reason = "stop_loss"
+        elif net_pct >= cfg.TAKE_PROFIT_PCT:
+            reason = "take_profit"
+        if not reason:
+            handled.update([long_sym, short_sym])
+            continue
+
+        net_credit = (trade.get("entry_price") or 0) + net_pl_dollars / (mult * qty)
+        print(f"[monitor] {reason.upper()} SPREAD {trade['symbol']} ({long_sym}/{short_sym}): "
+              f"net {net_pct:.1%} — closing both legs")
+        try:
+            _alpaca.submit_option_spread_close(long_sym, short_sym, qty=qty, net_credit=net_credit)
+            exit_price = round((trade.get("entry_price") or 0) + net_pl_dollars / (mult * qty), 2)
+            memory.record_trade_close(trade["id"], exit_price=exit_price, pnl=net_pl_dollars,
+                                      pnl_pct=net_pct, exit_reason=reason)
+            print(f"    [journal] {trade['symbol']} closed {net_pct:+.1%} ({reason}) — review with `python journal.py`")
+            _vote_sector_outcome(trade, net_pl_dollars)
+        except Exception as e:
+            print(f"[monitor] Spread close failed {trade['symbol']}: {e}")
+        handled.update([long_sym, short_sym])
+
+    # ── Single positions (equity + single-leg options) ─────────────────────────
     for pos in positions:
-        symbol   = pos["symbol"]
+        symbol = pos["symbol"]
+        if symbol in handled:
+            continue
+        # Action-time gate: never close one leg of an open structure on its own. A
+        # half-live spread (one leg vanished) would otherwise be stopped out here on
+        # its standalone P&L, stranding the other leg — the naked-leg bug.
+        if symbol in structure_legs:
+            print(f"[monitor] SKIP {symbol}: leg of an open structure — never closed alone")
+            continue
         unrealised_pnl_pct = float(pos.get("unrealized_plpc", 0))
         asset_class = pos.get("asset_class", "")
+        stop_threshold   = -cfg.EQUITY_STOP_LOSS_PCT if asset_class == "us_equity" else -cfg.OPTION_STOP_LOSS_PCT
+        profit_threshold = cfg.TAKE_PROFIT_PCT
 
-        if asset_class == "us_equity":
-            stop_threshold   = -cfg.EQUITY_STOP_LOSS_PCT
-            profit_threshold = cfg.TAKE_PROFIT_PCT
-        else:
-            stop_threshold   = -cfg.OPTION_STOP_LOSS_PCT
-            profit_threshold = cfg.TAKE_PROFIT_PCT
-
+        reason = None
         if unrealised_pnl_pct <= stop_threshold:
-            print(f"[monitor] STOP-LOSS {symbol}: {unrealised_pnl_pct:.1%} — closing")
-            try:
-                _alpaca.close_position(symbol)
-                _record_close(symbol, "stop_loss", unrealised_pnl_pct)
-            except Exception as e:
-                print(f"[monitor] Close failed {symbol}: {e}")
-
+            reason = "stop_loss"
         elif unrealised_pnl_pct >= profit_threshold:
-            print(f"[monitor] TAKE-PROFIT {symbol}: {unrealised_pnl_pct:.1%} — closing")
-            try:
-                _alpaca.close_position(symbol)
-                _record_close(symbol, "take_profit", unrealised_pnl_pct)
-            except Exception as e:
-                print(f"[monitor] Close failed {symbol}: {e}")
+            reason = "take_profit"
+        if not reason:
+            continue
+
+        print(f"[monitor] {reason.upper()} {symbol}: {unrealised_pnl_pct:.1%} — closing")
+        try:
+            _alpaca.close_position(symbol)
+            _record_close(symbol, reason, unrealised_pnl_pct)
+        except Exception as e:
+            print(f"[monitor] Close failed {symbol}: {e}")
 
 
 def _record_close(symbol: str, reason: str, pnl_pct: float):
@@ -396,18 +511,21 @@ def _record_close(symbol: str, reason: str, pnl_pct: float):
     memory.record_trade_close(trade["id"], exit_price=0, pnl=pnl_dollars, pnl_pct=pnl_pct, exit_reason=reason)
     # Transparency to the operator — the recorded thesis is now checked against reality.
     print(f"    [journal] {symbol} closed {pnl_pct:+.1%} ({reason}) — review with `python journal.py`")
+    _vote_sector_outcome(trade, pnl_dollars)
 
-    # Vote on the sector_failure finding that blocked (or didn't block) this sector.
-    # Loss in a blocked sector → upvote (block was right).
-    # Win in a blocked sector → downvote (block may be wrong).
+
+def _vote_sector_outcome(trade: dict, pnl_dollars: float):
+    """Vote on the sector_failure finding that blocked (or didn't block) this sector.
+    Loss in a blocked sector → upvote (block was right); win → downvote (block may be wrong)."""
     sector = trade.get("sector")
-    if sector:
-        blocked_map = _agentberg.get_blocked_sectors()
-        finding_id  = blocked_map.get(sector)
-        if finding_id:
-            vote = "up" if pnl_dollars < 0 else "down"
-            _agentberg.cast_vote(finding_id, vote)
-            print(f"    [vote] {vote}voted {sector} sector_failure (finding {finding_id})")
+    if not sector:
+        return
+    blocked_map = _agentberg.get_blocked_sectors()
+    finding_id  = blocked_map.get(sector)
+    if finding_id:
+        vote = "up" if pnl_dollars < 0 else "down"
+        _agentberg.cast_vote(finding_id, vote)
+        print(f"    [vote] {vote}voted {sector} sector_failure (finding {finding_id})")
 
 
 def _maybe_publish(blocked_sectors: list[str], regime: str | None):

@@ -175,3 +175,54 @@ class AlpacaClient:
                 {"symbol": sell_symbol, "side": "sell", "qty": str(qty), "position_intent": "sto"},
             ],
         })
+
+    def submit_option_spread_close(
+        self, long_symbol: str, short_symbol: str, qty: int, net_credit: float,
+    ) -> dict:
+        """
+        Close a debit spread atomically as a single multi-leg order.
+
+        Closing legs one at a time is the bug that breaks spreads: selling the
+        long leg while the short is open trips Alpaca's "uncovered contract"
+        reject, and evaluating the short leg standalone stops out a healthy
+        spread. One mleg order closes both legs together — no naked exposure.
+
+        net_credit = the minimum you'll accept to close (sell long, buy back short).
+        """
+        return self._post("/v2/orders", {
+            "type": "limit", "order_class": "mleg",
+            "time_in_force": "day", "limit_price": str(round(max(net_credit, 0.01), 2)),
+            "legs": [
+                {"symbol": long_symbol,  "side": "sell", "qty": str(qty), "position_intent": "stc"},
+                {"symbol": short_symbol, "side": "buy",  "qty": str(qty), "position_intent": "btc"},
+            ],
+        })
+
+    def get_position_symbols(self) -> set:
+        """Set of symbols currently held — the broker's source of truth for what's open."""
+        try:
+            return {p["symbol"] for p in self.get_positions()}
+        except Exception:
+            return set()
+
+    def get_last_fill(self, symbol: str, side: str | None = None, days: int = 14) -> dict | None:
+        """
+        Most recent filled order for a symbol (optionally a given side), newest first.
+        Used to reconcile a position that closed server-side (stop fired while app was
+        off): the fill price here is the exit truth the local ledger never recorded.
+        """
+        after = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+        try:
+            orders = self._get("/v2/orders", params={
+                "status": "closed", "symbols": symbol, "limit": 100,
+                "after": after, "direction": "desc",
+            })
+        except Exception:
+            return None
+        for o in orders:
+            if not o.get("filled_at"):
+                continue
+            if side and o.get("side") != side:
+                continue
+            return o
+        return None

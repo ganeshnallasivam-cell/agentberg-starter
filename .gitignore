@@ -4,3 +4,8 @@ character.json
 
 # Confirmed unique agent id from the network (per-install)
 .agent_id
+__pycache__/
+*.pyc
+agent.db
+.env
+logs/

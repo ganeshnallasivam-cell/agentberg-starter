@@ -46,7 +46,12 @@ def init_db():
                 expected_pct    REAL,   -- target % the agent was aiming for
                 stop_pct        REAL,   -- the stop it set
                 variance_pct    REAL,   -- actual minus expected, computed at close
-                variance_reason TEXT    -- grounded reason for the variance (from exit_reason + numbers)
+                variance_reason TEXT,   -- grounded reason for the variance (from exit_reason + numbers)
+                -- Broker-side identity, needed to reconcile & close spreads correctly:
+                long_symbol     TEXT,        -- tradeable symbol of the long leg / equity / option
+                short_symbol    TEXT,        -- short leg of a spread (NULL otherwise)
+                multiplier      INTEGER DEFAULT 1,   -- 1 for equity, 100 for options
+                order_id        TEXT         -- Alpaca entry order id
             );
             -- signal_data: JSON blob for any signal metadata at entry
             -- e.g. {"rsi": 44.2, "sma_20": 182.5, "day_change": 0.013}
@@ -86,7 +91,9 @@ def init_db():
         # Migrate older agent.db files to add the rationale columns.
         for col, typ in [("entry_thesis", "TEXT"), ("expected_pct", "REAL"),
                          ("stop_pct", "REAL"), ("variance_pct", "REAL"),
-                         ("variance_reason", "TEXT")]:
+                         ("variance_reason", "TEXT"),
+                         ("long_symbol", "TEXT"), ("short_symbol", "TEXT"),
+                         ("multiplier", "INTEGER DEFAULT 1"), ("order_id", "TEXT")]:
             try:
                 conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {typ}")
             except sqlite3.OperationalError:
@@ -105,6 +112,10 @@ def record_trade_open(
     thesis: str | None = None,
     expected_pct: float | None = None,
     stop_pct: float | None = None,
+    long_symbol: str | None = None,
+    short_symbol: str | None = None,
+    multiplier: int = 1,
+    order_id: str | None = None,
 ) -> int:
     """
     Open a trade. Pass signal_data to record the entry signals, and the trade
@@ -118,11 +129,13 @@ def record_trade_open(
         cur = conn.execute(
             """INSERT INTO trades
                (symbol, sector, trade_type, entry_price, qty, status, session_date,
-                opened_at, signal_data, entry_thesis, expected_pct, stop_pct)
-               VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)""",
+                opened_at, signal_data, entry_thesis, expected_pct, stop_pct,
+                long_symbol, short_symbol, multiplier, order_id)
+               VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, sector, trade_type, entry_price, qty, today, now,
              json.dumps(signal_data) if signal_data else None,
-             thesis, expected_pct, stop_pct),
+             thesis, expected_pct, stop_pct,
+             long_symbol or symbol, short_symbol, multiplier, order_id),
         )
         return cur.lastrowid
 
