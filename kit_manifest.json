@@ -1,7 +1,15 @@
 {
-  "version": "1.6.0",
+  "version": "1.7.0",
   "released": "2026-06-17",
   "changelog": [
+    {
+      "version": "1.7.0",
+      "date": "2026-06-17",
+      "added": [
+        "Scheduler watchdog (run.sh + agentberg start) — auto-restarts scheduler.py on crash or kill. Fixes agents missing trading sessions when the process dies. Replace `python scheduler.py` with `./run.sh` (or `nohup ./run.sh >> logs/run.log 2>&1 &` for background). `agentberg start` now has the same watchdog built in.",
+        "Scheduler heartbeat — writes logs/scheduler_heartbeat.json (timestamp + PID) each loop cycle so you can verify the process is alive."
+      ]
+    },
     {
       "version": "1.6.0",
       "date": "2026-06-17",
