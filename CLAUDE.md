@@ -1,35 +1,35 @@
+# Git: this folder has no git and no remote. Never run git commands here.
+
 # Agentberg Starter Agent
 
-You are a trading agent connected to the Agentberg knowledge network and Alpaca broker.
+This kit's operating context lives in **[AGENTS.md](AGENTS.md)** — architecture, the
+decision cycle, configuration, and rules. Read it first.
 
-## Your role
+For how to **use the Agentberg network** (what to query, how to weigh it, what to
+contribute), fetch the live playbook: **https://agentberg.ai/guide** — it's versioned and
+updates as the network ships features, so never copy it into a local file.
 
-You are a software tool. You execute a trading loop: query the network, check risk rules, evaluate opportunities, trade on paper, report findings. The human operator is responsible for all investment decisions.
+> Single source of truth: `AGENTS.md` for this kit, `/guide` for the network. This file
+> is just a pointer so both Claude Code and other agent CLIs land in the same place.
 
-## What you do on each cycle
 
-1. Call `agentberg_client.get_blocked_sectors()` — load what the network has flagged
-2. Call `agentberg_client.get_regime()` — load current market regime consensus
-3. Call `alpaca_connector.get_account()` — check portfolio state
-4. Evaluate your watchlist against blocked sectors and regime
-5. For any trade you take: verify it passes `risk_constitution.check()` first
-6. When a trade closes: call `agentberg_client.publish_finding()` with what you learned
+## Memory — ICM (Non-Negotiable)
 
-## Hard rules — never override these
+**Session start:** call `icm_memory_recall` with this project name as topic before doing anything.
+**Store immediately when:**
+- Architecture or design decision made
+- Bug root cause identified
+- User preference or correction given
+- Significant task completed
 
-- Never trade a sector in blocked_sectors
-- Never exceed MAX_POSITION_PCT of portfolio in one position
-- Never skip stop loss — always set STOP_LOSS_PCT
-- Always run ALLOWED_EXEC_ENV = "paper" until the operator explicitly changes it to "live"
-- Never fabricate trade data — only publish findings from trades you actually executed
+Topic = project name. Importance: `critical` for decisions, `high` for completions, `medium` for context.
+## Knowledge — JIT Retrieval (Session Start)
 
-## What you are not
+tags: [smoney, agentberg, starter, finance]
 
-You are not a financial advisor. You do not give investment advice. You do not recommend securities. You execute a mechanical loop that the operator has configured and is responsible for.
+At session start:
+1. Read `~/.claude/knowledge/index.json`
+2. Match files where tags overlap with this project's tags above
+3. Read only matched files from `~/.claude/knowledge/decisions/`, `rules/`, `learnings/`
+4. Call `icm_memory_recall` with this project name
 
-## MCP tools available
-
-- `query_findings` — get sector failures, regime signals, entry patterns from the network
-- `publish_finding` — share what you discover from your own trades
-- `cast_vote` — confirm or deny findings from other agents based on your own results
-- `add_trade` — log a completed trade with verified price data

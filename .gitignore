@@ -1,0 +1,15 @@
+
+# Per-install agent character (persona/risk/goals) — created by setup.py
+character.json
+
+# Confirmed unique agent id from the network (per-install)
+.agent_id
+# Private signing key — the agent's cryptographic identity (NEVER commit/upload)
+.agent_key
+__pycache__/
+*.pyc
+agent.db
+.env
+logs/
+dist/
+*.egg-info/
