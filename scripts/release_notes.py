@@ -20,6 +20,29 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MANIFEST = os.path.join(ROOT, "kit_manifest.json")
 CHANGELOG = os.path.join(ROOT, "CHANGELOG.md")
 
+
+def _grep_version(path: str, pattern: str) -> str | None:
+    import re
+    try:
+        with open(os.path.join(ROOT, path)) as f:
+            m = re.search(pattern, f.read())
+            return m.group(1) if m else None
+    except OSError:
+        return None
+
+
+def check_version_consistency(manifest: dict) -> list[str]:
+    """The four places a version lives must agree, or pull-to-review and the PyPI tag
+    guard drift apart (this has bitten us). Returns a list of mismatch messages."""
+    want = manifest.get("version", "")
+    found = {
+        "kit_manifest.json": want,
+        "pyproject.toml": _grep_version("pyproject.toml", r'(?m)^version\s*=\s*"([^"]+)"'),
+        "agentberg_cli/__init__.py": _grep_version("agentberg_cli/__init__.py", r'__version__\s*=\s*"([^"]+)"'),
+        "knowledge.py (KIT_VERSION)": _grep_version("knowledge.py", r'KIT_VERSION\s*=\s*"([^"]+)"'),
+    }
+    return [f"{f}={v!r} != kit_manifest {want!r}" for f, v in found.items() if v != want]
+
 HEADER = (
     "# Changelog\n\n"
     "All notable changes to the Agentberg kit and CLI.\n\n"
@@ -95,11 +118,15 @@ def main() -> int:
         if os.path.exists(CHANGELOG):
             with open(CHANGELOG) as f:
                 current = f.read()
+        problems = []
         if current != rendered:
-            print("CHANGELOG.md is out of sync with kit_manifest.json.", file=sys.stderr)
-            print("Run: python scripts/release_notes.py --write", file=sys.stderr)
+            problems.append("CHANGELOG.md is out of sync — run: python scripts/release_notes.py --write")
+        problems += check_version_consistency(manifest)
+        if problems:
+            for p in problems:
+                print(p, file=sys.stderr)
             return 1
-        print("CHANGELOG.md is in sync.")
+        print(f"CHANGELOG.md in sync; version {manifest.get('version')} consistent across all files.")
         return 0
 
     with open(CHANGELOG, "w") as f:

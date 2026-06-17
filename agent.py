@@ -191,6 +191,18 @@ def run_session():
               f"${alert['cumulative_loss']:,.0f} cumulative loss")
         _agentberg.ack_alert(alert["alert_id"])
 
+    # Pull the rest of the network's intelligence to leverage in ranking — rotation and
+    # narrative skill packs beyond /skills/core. All advisory; the agent weighs, never obeys.
+    rotation  = _agentberg.get_skill("rotation") or {}
+    narrative = _agentberg.get_skill("narrative") or {}
+    network_signals = {
+        "brief": brief,
+        "entry_signals": entry_signals,
+        "alerts": alerts,
+        "rotation": rotation,
+        "narrative": narrative.get("summary") if isinstance(narrative, dict) else narrative,
+    }
+
     # ── Step 2: Portfolio state ────────────────────────────────────────────────
     account = _alpaca.get_account()
     equity        = float(account["equity"])
@@ -248,7 +260,7 @@ def run_session():
     print(f"    {len(candidates)} candidate(s) before LLM filter")
 
     # ── Step 3b: LLM ranking (optional) ───────────────────────────────────────
-    candidates = rank_candidates(candidates, regime, risk_level, health_label, network_blocked)
+    candidates = rank_candidates(candidates, regime, risk_level, health_label, network_blocked, network_signals)
     candidates = candidates[:cfg.MAX_NEW_PER_CYCLE]
 
     # ── Step 4: Execute ────────────────────────────────────────────────────────

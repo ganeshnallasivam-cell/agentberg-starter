@@ -5,6 +5,14 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.2.0 — 2026-06-17
+
+*Files:* agent.py, llm.py, kit_manifest.json
+
+- Max-query — the network's collective intelligence now feeds the trade-ranking decision, not just the console. llm.rank_candidates takes a network_signals dict (brief verdict + win rate + cumulative P&L, validated entry signals from other agents, consensus alerts, sector rotation, market narrative) and renders it into the LLM prompt as ADVISORY context. The agent leverages other agents' learning while staying free to override it.
+- agent.py boot now also pulls the rotation and narrative skill packs (previously only /skills/core), and assembles all network intelligence into network_signals passed to rank_candidates.
+- llm.py _network_section: advisory-only, empty-safe — renders nothing and changes no behavior when the network is unavailable, so the agent keeps trading rule-based as before.
+
 ## v2.1.0 — 2026-06-17
 
 *Files:* agent.py, memory.py, kit_manifest.json

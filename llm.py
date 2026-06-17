@@ -37,7 +37,49 @@ _ADAPTERS = {
 _AUTO_ORDER = ["claude", "gemini", "openai", "deepseek"]
 
 
-def _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors) -> str:
+def _network_section(network_signals: dict | None) -> str:
+    """Render Agentberg network intelligence for the prompt. Empty when unavailable —
+    the agent leverages the network's collective learning when it's there, ignores it
+    cleanly when it's not. All of it is ADVISORY: it informs, it does not decide."""
+    if not network_signals:
+        return ""
+    lines = ["\nAgentberg network intelligence (ADVISORY — collective learning from other agents):"]
+
+    brief = network_signals.get("brief") or {}
+    if brief:
+        wr = brief.get("network_win_rate")
+        wr_str = f"{wr:.0%}" if isinstance(wr, (int, float)) else "n/a"
+        lines.append(
+            f"- Network verdict: {str(brief.get('verdict', 'amber')).upper()} "
+            f"(confidence {brief.get('confidence', 0):.0%}) | network win rate {wr_str} "
+            f"| cumulative P&L ${brief.get('cumulative_pnl', 0):+,.0f}"
+        )
+
+    signals = network_signals.get("entry_signals") or []
+    if signals:
+        lines.append("- Validated entry signals from other agents (higher weight = more replicated):")
+        for s in signals[:5]:
+            lines.append(f"    • [{s.get('weight', '?')}x] {str(s.get('claim', ''))[:140]}")
+
+    alerts = network_signals.get("alerts") or []
+    for a in alerts:
+        lines.append(
+            f"- ⚠ CONSENSUS ALERT: {a.get('sector')} — {a.get('agent_count')} agents losing, "
+            f"${a.get('cumulative_loss', 0):,.0f} cumulative loss. Treat as a strong caution."
+        )
+
+    rotation = network_signals.get("rotation") or {}
+    if rotation.get("into") or rotation.get("out_of"):
+        lines.append(f"- Sector rotation: into {rotation.get('into') or '?'} / out of {rotation.get('out_of') or '?'}")
+
+    narrative = network_signals.get("narrative")
+    if narrative:
+        lines.append(f"- Market narrative: {str(narrative)[:200]}")
+
+    return "\n".join(lines) + "\n"
+
+
+def _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors, network_signals=None) -> str:
     return f"""You are a disciplined trading agent reviewing candidates.
 
 Market context:
@@ -45,7 +87,7 @@ Market context:
 - Risk level: {risk_level or "unknown"}
 - Market health: {health_label or "unknown"}
 - Network-flagged sectors (ADVISORY — the network is cautious here; weigh against them, but you MAY trade if your own analysis is strong): {blocked_sectors or "none"}
-
+{_network_section(network_signals)}
 {character.persona_brief()}
 
 Candidates:
@@ -101,11 +143,16 @@ def rank_candidates(
     risk_level: str,
     health_label: str,
     blocked_sectors: list[str],
+    network_signals: dict | None = None,
 ) -> list[dict]:
     """
     Ask the configured AI provider to review candidates and return only the ones worth
     trading. Falls back to the original list if no provider is available or output is
     unparseable — the agent always keeps trading.
+
+    network_signals (optional): the network's collective intelligence — brief verdict,
+    validated entry signals, consensus alerts, rotation/narrative — injected as ADVISORY
+    context so the agent leverages other agents' learning without being bound by it.
     """
     if not candidates:
         return candidates
@@ -116,7 +163,7 @@ def rank_candidates(
     if adapter is None:
         return candidates
 
-    prompt = _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors)
+    prompt = _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors, network_signals)
     try:
         raw = adapter.run(prompt)
         payload = _extract_json_array(raw)
