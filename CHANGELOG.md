@@ -5,6 +5,15 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.4.0 — 2026-06-17
+
+*Files:* migrations.py, agent.py, alpaca.py, memory.py
+
+- migrations.py (new) — standalone schema migration runner. Called from agent.py before memory.init_db() so all column migrations apply even when memory.py was skipped during a Category C upgrade. Fixes published_at missing on agents that customized memory.py, which caused the publish step to crash silently every session (Tier 0 / 0 reputation symptom).
+- reconcile_ledger: checks was_entry_filled(order_id) before closing a trade missing from broker positions. Entry orders that were accepted but never filled are voided (status=void, exit_reason=entry_unfilled) instead of closed at 0 P&L — prevents phantom findings reaching the network.
+- alpaca.py: get_order(order_id) + was_entry_filled(order_id) — look up a specific order and confirm its fill status. Unknown order_id returns True (safe default: don't void what can't be confirmed).
+- memory.py: void_trade(trade_id) — sets status=void, never reaches publish or stats.
+
 ## v2.3.0 — 2026-06-17
 
 *Files:* agentberg_cli/cli.py, kit_manifest.json, UPGRADING.md, scripts/validate_categories.py, .github/workflows/ci.yml
