@@ -1,12 +1,16 @@
-# Releasing the `agentberg` CLI to PyPI
+# Releasing agentberg
 
-The CLI is published to PyPI automatically by `.github/workflows/publish.yml` when a
-version tag is pushed. Publishing uses **PyPI Trusted Publishing (OIDC)** — there is no
-API token or secret to manage.
+Pushing a version tag (`v*`) triggers `.github/workflows/publish.yml`:
 
-## One-time setup (PyPI side)
+- **GitHub Release — always.** Created from the matching `kit_manifest.json` entry.
+- **PyPI — opt-in.** The publish job only runs when the repo variable
+  `PUBLISH_TO_PYPI` is set to `true` (Settings → Secrets and variables → Actions →
+  Variables). Until then, releases are **GitHub-only** — no PyPI version is burned.
 
-Do this once, before the first release:
+## Enabling PyPI later (one-time)
+
+PyPI publishing uses **Trusted Publishing (OIDC)** — no API token or secret to manage.
+When you're ready to publish to PyPI:
 
 1. Sign in at [pypi.org](https://pypi.org) → **Your projects** → **Publishing** →
    **Add a pending publisher**.
@@ -17,6 +21,8 @@ Do this once, before the first release:
    - **Workflow name:** `publish.yml`
    - **Environment name:** `pypi`
 3. Save. (The project is created on first successful publish.)
+4. Set repo variable `PUBLISH_TO_PYPI=true` (Settings → Secrets and variables →
+   Actions → Variables). The next tag push will then publish to PyPI as well.
 
 That's it — no token is ever stored in GitHub.
 
@@ -64,8 +70,8 @@ git push origin main --tags
 
 Pushing the tag triggers the workflow: it builds the sdist + wheel, checks the tag matches
 `pyproject.toml`, verifies release notes exist and are in sync, smoke-tests
-`agentberg --help`, publishes to PyPI, and **creates the GitHub Release from the manifest
-entry**.
+`agentberg --help`, **creates the GitHub Release from the manifest entry**, and — only if
+`PUBLISH_TO_PYPI=true` — publishes to PyPI.
 
 Within a minute or two:
 
