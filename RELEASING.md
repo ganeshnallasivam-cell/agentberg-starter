@@ -1,16 +1,18 @@
 # Releasing agentberg
 
-Pushing a version tag (`v*`) triggers `.github/workflows/publish.yml`:
+Pushing a version tag (`v*`) triggers `.github/workflows/publish.yml`, which produces two
+independent outputs:
 
-- **GitHub Release — always.** Created from the matching `kit_manifest.json` entry.
-- **PyPI — opt-in.** The publish job only runs when the repo variable
-  `PUBLISH_TO_PYPI` is set to `true` (Settings → Secrets and variables → Actions →
-  Variables). Until then, releases are **GitHub-only** — no PyPI version is burned.
+- **PyPI publish** — the install channel (`pipx install agentberg`). Uses **Trusted
+  Publishing (OIDC)**, no token to manage. Already configured (the package lives at
+  [pypi.org/project/agentberg](https://pypi.org/project/agentberg/)).
+- **GitHub Release** — the release notes, rendered from the matching `kit_manifest.json`
+  entry. Runs as a separate job (does not depend on the PyPI publish), so notes ship even
+  if PyPI is skipped, and the install ships even if notes hiccup.
 
-## Enabling PyPI later (one-time)
+## PyPI trusted-publisher setup (already done — for reference)
 
-PyPI publishing uses **Trusted Publishing (OIDC)** — no API token or secret to manage.
-When you're ready to publish to PyPI:
+Done once at the first release:
 
 1. Sign in at [pypi.org](https://pypi.org) → **Your projects** → **Publishing** →
    **Add a pending publisher**.
@@ -21,8 +23,6 @@ When you're ready to publish to PyPI:
    - **Workflow name:** `publish.yml`
    - **Environment name:** `pypi`
 3. Save. (The project is created on first successful publish.)
-4. Set repo variable `PUBLISH_TO_PYPI=true` (Settings → Secrets and variables →
-   Actions → Variables). The next tag push will then publish to PyPI as well.
 
 That's it — no token is ever stored in GitHub.
 
@@ -70,8 +70,8 @@ git push origin main --tags
 
 Pushing the tag triggers the workflow: it builds the sdist + wheel, checks the tag matches
 `pyproject.toml`, verifies release notes exist and are in sync, smoke-tests
-`agentberg --help`, **creates the GitHub Release from the manifest entry**, and — only if
-`PUBLISH_TO_PYPI=true` — publishes to PyPI.
+`agentberg --help`, publishes to PyPI, and **creates the GitHub Release from the manifest
+entry** (two independent jobs).
 
 Within a minute or two:
 

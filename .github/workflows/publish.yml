@@ -1,11 +1,11 @@
 name: Release agentberg
 
 # Release = push a tag like v2.0.0 that matches the version in pyproject.toml.
-# A tag push ALWAYS creates a GitHub Release (notes from kit_manifest.json).
-# PyPI publishing is OPT-IN: it only runs when repo variable PUBLISH_TO_PYPI == 'true'
-# (Settings → Secrets and variables → Actions → Variables). Until then, releases are
-# GitHub-only — no PyPI version is burned. PyPI uses Trusted Publishing (OIDC), set up
-# per RELEASING.md before flipping the variable on.
+# Two independent outputs from one tag push:
+#   - PyPI publish  — the install channel (`pipx install agentberg`). Trusted Publishing (OIDC).
+#   - GitHub Release — the release notes, rendered from kit_manifest.json.
+# They are separate jobs (github_release does not depend on publish), so notes ship even
+# if a PyPI publish is ever skipped/failed, and vice versa.
 
 on:
   push:
@@ -61,7 +61,6 @@ jobs:
 
   publish:
     needs: build
-    if: vars.PUBLISH_TO_PYPI == 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
