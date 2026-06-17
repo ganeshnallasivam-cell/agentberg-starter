@@ -279,13 +279,19 @@ def run_session():
                 print(f"    SKIP {ticker}: {reason}")
                 continue
             try:
-                qty        = max(1, int(pos_value / c["price"]))
-                side       = "buy" if direction == "bullish" else "sell"
-                stop_price = c["price"] * (1 - cfg.EQUITY_STOP_LOSS_PCT) if side == "buy" else None
-                order      = _alpaca.submit_order(ticker, qty, side, stop_loss_price=stop_price)
-                trade_id   = memory.record_trade_open(ticker, sector, c["price"], qty,
+                # Use live snapshot price for sizing and bracket levels —
+                # bar close is yesterday's price; stop off a stale price
+                # is wrong and can misplace the bracket by several percent.
+                live_price   = _alpaca.get_live_price(ticker) or c["price"]
+                qty          = max(1, int(pos_value / live_price))
+                side         = "buy" if direction == "bullish" else "sell"
+                stop_price        = round(live_price * (1 - cfg.EQUITY_STOP_LOSS_PCT), 2) if side == "buy" else None
+                take_profit_price = round(live_price * (1 + cfg.TAKE_PROFIT_PCT), 2)       if side == "buy" else None
+                order      = _alpaca.submit_order(ticker, qty, side,
+                                stop_loss_price=stop_price, take_profit_price=take_profit_price)
+                trade_id   = memory.record_trade_open(ticker, sector, live_price, qty,
                                 signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct)
-                print(f"    ORDER {ticker}: {side} ×{qty} @ ~${c['price']:.2f}  stop=${stop_price:.2f if stop_price else 'none'}")
+                print(f"    ORDER {ticker}: {side} ×{qty} @ ~${live_price:.2f}  stop=${stop_price or 'none'}  tp=${take_profit_price or 'none'}")
                 executed.append({**c, "qty": qty, "order_id": order["id"], "memory_id": trade_id})
                 open_count += 1
             except Exception as e:

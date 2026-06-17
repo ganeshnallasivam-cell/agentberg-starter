@@ -1,7 +1,18 @@
 {
-  "version": "1.8.0",
+  "version": "1.9.0",
   "released": "2026-06-17",
   "changelog": [
+    {
+      "version": "1.9.0",
+      "date": "2026-06-17",
+      "files": ["alpaca.py", "agent.py", "knowledge.py", "kit_manifest.json"],
+      "added": [
+        "alpaca.py get_bars: add start date param — Alpaca was returning only 1 bar without it, causing 0 candidates. Start is now set to limit×2 days back (buffer for weekends/holidays).",
+        "alpaca.py submit_order: bracket orders now require take_profit_price alongside stop_loss_price. Alpaca rejects bracket orders missing take_profit.limit_price. Raises ValueError at call site if missing so the error is caught before hitting the broker.",
+        "alpaca.py: new get_live_price() — fetches latestTrade.p from snapshot for use at order time.",
+        "agent.py: equity orders now fetch live snapshot price before sizing and bracket calculation. Bar close was yesterday's price; stop off stale price misplaces the bracket. take_profit also set server-side at live_price × (1 + TAKE_PROFIT_PCT)."
+      ]
+    },
     {
       "version": "1.8.0",
       "date": "2026-06-17",

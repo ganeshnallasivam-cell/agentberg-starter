@@ -69,10 +69,14 @@ class AlpacaClient:
     # ── Market data ────────────────────────────────────────────────────────────
 
     def get_bars(self, ticker: str, timeframe: str = "1Day", limit: int = 40) -> list:
+        # start is required — without it Alpaca may return only the most recent bar.
+        # 2× buffer accounts for weekends and holidays in the lookback window.
+        start = (datetime.date.today() - datetime.timedelta(days=limit * 2)).isoformat()
         data = self._data_get("/v2/stocks/bars", params={
             "symbols": ticker,
             "timeframe": timeframe,
             "limit": limit,
+            "start": start,
             "feed": "iex",
         })
         return data.get("bars", {}).get(ticker, [])
@@ -82,6 +86,18 @@ class AlpacaClient:
 
     # ── Equity orders ──────────────────────────────────────────────────────────
 
+    def get_live_price(self, ticker: str) -> float | None:
+        """Latest trade price from snapshot — use for order sizing and stop calc."""
+        try:
+            snap = self._data_get(f"/v2/stocks/{ticker}/snapshot")
+            return float(
+                snap.get("latestTrade", {}).get("p")
+                or snap.get("latestQuote", {}).get("ap")
+                or 0
+            ) or None
+        except Exception:
+            return None
+
     def submit_order(
         self,
         ticker: str,
@@ -90,6 +106,7 @@ class AlpacaClient:
         order_type: str = "market",
         limit_price: float = None,
         stop_loss_price: float = None,
+        take_profit_price: float = None,
     ) -> dict:
         payload = {
             "symbol": ticker,
@@ -101,9 +118,12 @@ class AlpacaClient:
         if limit_price is not None:
             payload["limit_price"] = str(limit_price)
         if stop_loss_price:
-            # Bracket order — Alpaca holds the stop server-side
+            # Bracket order — Alpaca requires BOTH stop_loss and take_profit.
+            if take_profit_price is None:
+                raise ValueError(f"Alpaca bracket orders require take_profit_price alongside stop_loss_price for {ticker}")
             payload["order_class"] = "bracket"
-            payload["stop_loss"] = {"stop_price": str(round(stop_loss_price, 2))}
+            payload["stop_loss"]   = {"stop_price": str(round(stop_loss_price, 2))}
+            payload["take_profit"] = {"limit_price": str(round(take_profit_price, 2))}
         return self._post("/v2/orders", payload)
 
     def get_recent_closed_orders(self, limit: int = 50, days: int = 7) -> list:
