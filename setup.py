@@ -51,14 +51,19 @@ def _run_interactive(existing: dict) -> dict:
 
 
 def _run_set(arg: str, existing: dict) -> dict:
-    """Accept JSON object or key=value pairs."""
+    """Accept JSON object or key=value pairs.
+
+    key=value mode splits only on commas that precede another key= token, so
+    list values like preferred_sectors=Technology,Energy are not truncated.
+    """
+    import re
     answers = dict(existing)
     arg = arg.strip()
     if arg.startswith("{"):
         updates = json.loads(arg)
     else:
         updates = {}
-        for pair in arg.split(","):
+        for pair in re.split(r",\s*(?=\w+=)", arg):
             if "=" in pair:
                 k, v = pair.split("=", 1)
                 updates[k.strip()] = v.strip()

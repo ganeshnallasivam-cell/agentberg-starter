@@ -81,13 +81,13 @@ def _is_market_hours() -> bool:
 
 
 def _seconds_until(target_time: datetime.time) -> float:
-    """Seconds until the next occurrence of target_time ET (same or next weekday)."""
+    """Seconds until the next occurrence of target_time ET on a trading day."""
     now = _now_et()
     candidate = now.replace(hour=target_time.hour, minute=target_time.minute, second=0, microsecond=0)
     if candidate <= now:
         candidate += datetime.timedelta(days=1)
-    # Skip weekends
-    while candidate.weekday() >= 5:
+    # Skip weekends and holidays
+    while candidate.weekday() >= 5 or _is_market_holiday(candidate):
         candidate += datetime.timedelta(days=1)
     return (candidate - now).total_seconds()
 
@@ -189,7 +189,9 @@ def main():
 
             # ── Full sessions ──────────────────────────────────────────────────────
             if now.weekday() >= 5 or _is_market_holiday(now):
-                time.sleep(MONITOR_INTERVAL_SECS)
+                wait = max(60, _seconds_until(SESSION_TIMES[0]) - 1800)
+                log.info(f"Market closed (holiday/weekend) — sleeping {wait/3600:.1f}h")
+                time.sleep(wait)
                 continue
 
             for session_time in SESSION_TIMES:

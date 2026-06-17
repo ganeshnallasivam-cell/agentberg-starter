@@ -14,6 +14,7 @@ You are responsible for all trading decisions and outcomes.
 """
 
 import datetime
+import os
 
 import character
 import config as cfg
@@ -34,7 +35,6 @@ def _ensure_registered():
     """One-time: claim our id on the network. If it was already taken, the network
     assigns a UNIQUE one — we persist it to .agent_id, adopt it for this session, and
     tell the operator. After that, config.py loads the confirmed id automatically."""
-    import os
     idfile = os.path.join(os.path.dirname(__file__), ".agent_id")
     if os.path.exists(idfile):
         return  # already registered
@@ -282,7 +282,10 @@ def run_session():
                 # Use live snapshot price for sizing and bracket levels —
                 # bar close is yesterday's price; stop off a stale price
                 # is wrong and can misplace the bracket by several percent.
-                live_price   = _alpaca.get_live_price(ticker) or c["price"]
+                live_price = _alpaca.get_live_price(ticker)
+                if live_price is None:
+                    print(f"    [warn] live price fetch failed for {ticker} — using bar close ${c['price']:.2f}")
+                    live_price = c["price"]
                 qty          = max(1, int(pos_value / live_price))
                 side         = "buy" if direction == "bullish" else "sell"
                 stop_price        = round(live_price * (1 - cfg.EQUITY_STOP_LOSS_PCT), 2) if side == "buy" else None
@@ -330,7 +333,8 @@ def run_session():
             try:
                 order    = _alpaca.submit_option_single(contract["symbol"], qty=1, side="buy", limit_price=limit_price)
                 trade_id = memory.record_trade_open(ticker, sector, limit_price, 1, trade_type=f"long_{option_type}",
-                                signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct)
+                                signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct,
+                                long_symbol=contract["symbol"])
                 print(f"    ORDER {ticker} {option_type.upper()} {contract['expiration_date']} ${contract['strike_price']} δ={delta:.2f} @ ${limit_price:.2f}")
                 executed.append({**c, "symbol": contract["symbol"], "premium": limit_price, "memory_id": trade_id})
                 open_count += 1
@@ -394,7 +398,7 @@ def run_session():
         blocked_sectors=blocked_sectors,
         candidates_found=len(candidates),
         positions_opened=len(executed),
-        positions_closed=0,   # updated by check_positions()
+        positions_closed=memory.count_closed_today(),
         session_pnl=0,        # calculated from closed trades
         regime=regime,
     )
@@ -525,7 +529,7 @@ def check_positions():
 
 def _record_close(symbol: str, reason: str, pnl_pct: float):
     open_trades = memory.get_open_trades()
-    trade = next((t for t in open_trades if t["symbol"] == symbol), None)
+    trade = next((t for t in open_trades if t["symbol"] == symbol or t.get("long_symbol") == symbol), None)
     if not trade:
         return
     pnl_dollars = (trade.get("entry_price") or 0) * (trade.get("qty") or 0) * pnl_pct
@@ -609,12 +613,10 @@ def _maybe_publish(blocked_sectors: list[str], regime: str | None):
                 execution_env="paper" if cfg.ALPACA_PAPER else "live",
             )
             trade_published += 1
-        if trade_published:
-            memory.mark_published("recent_trades")
+        memory.mark_published("recent_trades")
         published += trade_published
 
-    if published > 0:
-        memory.mark_published("sector_findings")
+    memory.mark_published("sector_findings")
     print(f"    Published {published} finding(s) / trade(s)")
 
 

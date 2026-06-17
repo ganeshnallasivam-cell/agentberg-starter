@@ -19,6 +19,7 @@ def available() -> bool:
 
 
 def run(prompt: str) -> str:
+    import os as _os
     with tempfile.NamedTemporaryFile("r", suffix=".txt", delete=False) as f:
         out_path = f.name
     cmd = [
@@ -38,6 +39,11 @@ def run(prompt: str) -> str:
             final = f.read()
     except OSError:
         final = ""
+    finally:
+        try:
+            _os.unlink(out_path)
+        except OSError:
+            pass
     raw = final.strip() or proc.stdout
     if proc.returncode != 0 and not raw.strip():
         err = (proc.stderr or "error").strip().splitlines()

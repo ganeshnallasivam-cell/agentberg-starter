@@ -78,7 +78,7 @@ MAX_IV_RANK_TO_BUY: float = 30.0   # don't buy when IV is expensive
 
 # ── Spreads ────────────────────────────────────────────────────────────────────
 MAX_SPREAD_DEBIT_PCT:  float = 0.33   # max debit as % of spread width
-EARNINGS_BLACKOUT_DAYS: int = 5       # don't open options within 5 days of earnings
+EARNINGS_BLACKOUT_DAYS: int = 5       # NOT ENFORCED — placeholder; risk.py does not yet check earnings calendar
 
 # ── Network rules ──────────────────────────────────────────────────────────────
 # Blocked sectors are populated from Agentberg at runtime — no need to set here.

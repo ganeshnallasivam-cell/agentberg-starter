@@ -15,7 +15,8 @@ set -euo pipefail
 
 BACKOFF=5
 MAX_BACKOFF=300
-SCHEDULER="scheduler.py"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCHEDULER="$SCRIPT_DIR/scheduler.py"
 PYTHON="${PYTHON:-python3}"
 
 mkdir -p logs

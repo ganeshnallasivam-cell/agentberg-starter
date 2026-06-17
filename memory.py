@@ -331,6 +331,17 @@ def get_recent_trades(limit: int = 20) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def count_closed_today() -> int:
+    """Trades closed today (by any path — monitor, reconcile, or session)."""
+    today = datetime.date.today().isoformat()
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) n FROM trades WHERE status='closed' AND date(closed_at)=?",
+            (today,),
+        ).fetchone()
+    return row["n"] or 0
+
+
 def get_open_trades() -> list[dict]:
     with _conn() as conn:
         rows = conn.execute(

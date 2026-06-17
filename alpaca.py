@@ -169,7 +169,7 @@ class AlpacaClient:
     def get_iv_rank(self, ticker: str) -> float | None:
         """IV rank 0-100. Buy premium when < 30. Returns None if unavailable."""
         try:
-            snap = self._get(f"/v2/stocks/{ticker}/snapshot")
+            snap = self._data_get(f"/v2/stocks/{ticker}/snapshot")
             iv = snap.get("impliedVolatility")
             hi = snap.get("impliedVolatilityHigh52Week")
             lo = snap.get("impliedVolatilityLow52Week")

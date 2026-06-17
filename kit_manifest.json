@@ -1,7 +1,22 @@
 {
-  "version": "1.9.0",
+  "version": "2.0.0",
   "released": "2026-06-17",
   "changelog": [
+    {
+      "version": "2.0.0",
+      "date": "2026-06-17",
+      "files": ["agent.py", "alpaca.py", "scheduler.py", "config.py", "knowledge.py", "kit_manifest.json"],
+      "added": [
+        "agent.py premium_buyer: record_trade_open now passes long_symbol=contract['symbol'] — without this, reconcile_ledger spuriously closed every open options position each session (matched by underlying 'AAPL', not held full contract symbol 'AAPL240119C00150000'), and _record_close/vote_sector_outcome never fired for options.",
+        "agent.py _record_close: now matches on t.get('long_symbol') == symbol in addition to t['symbol'] — options positions closed by the monitor are correctly recorded in the ledger and voted on.",
+        "alpaca.py get_iv_rank: fixed _get → _data_get — IV rank was always None (broker API has no snapshot data); MAX_IV_RANK_TO_BUY check now actually runs.",
+        "agent.py equity path: logs a warning when live price fetch fails and bar close is used — previously silent fallback.",
+        "agent.py _maybe_publish: sector_findings and recent_trades gates now always marked after first daily attempt, not only when something was published — prevents afternoon session re-querying Alpaca and Agentberg on days with no new content.",
+        "scheduler.py _seconds_until: now skips both weekends AND holidays — previously only skipped weekends, so off-hours sleep could target a holiday morning.",
+        "scheduler.py main loop: holiday/weekend sleep now uses _seconds_until(next_session) - 1800 instead of 5-min poll — was waking up 576 times per weekend.",
+        "config.py EARNINGS_BLACKOUT_DAYS: labelled NOT ENFORCED — risk.py never checked it; was creating false safety impression."
+      ]
+    },
     {
       "version": "1.9.0",
       "date": "2026-06-17",

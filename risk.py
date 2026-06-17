@@ -17,7 +17,7 @@ def check_equity(
     open_positions: int,
 ) -> tuple[bool, str]:
     if sector in blocked_sectors:
-        return False, f"{sector} blocked by network consensus"
+        return False, f"{sector} blocked by your MANUAL_BLOCKED_SECTORS rule"
     if regime and regime in cfg.BLOCKED_REGIMES:
         return False, f"Regime '{regime}' blocked — no new longs"
     if open_positions >= cfg.MAX_POSITIONS:
@@ -40,7 +40,7 @@ def check_option(
     iv_rank: float | None = None,
 ) -> tuple[bool, str]:
     if sector in blocked_sectors:
-        return False, f"{sector} blocked by network consensus"
+        return False, f"{sector} blocked by your MANUAL_BLOCKED_SECTORS rule"
     if regime and regime in cfg.BLOCKED_REGIMES:
         return False, f"Regime '{regime}' blocked — no new longs"
     if open_positions >= cfg.MAX_POSITIONS:
@@ -71,7 +71,7 @@ def check_spread(
     dte: int,
 ) -> tuple[bool, str]:
     if sector in blocked_sectors:
-        return False, f"{sector} blocked by network consensus"
+        return False, f"{sector} blocked by your MANUAL_BLOCKED_SECTORS rule"
     if regime and regime in cfg.BLOCKED_REGIMES:
         return False, f"Regime '{regime}' blocked — no new longs"
     if open_positions >= cfg.MAX_POSITIONS:
