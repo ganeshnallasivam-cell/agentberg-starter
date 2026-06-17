@@ -366,6 +366,16 @@ def mark_trade_published(trade_id: int) -> None:
         conn.execute("UPDATE trades SET published_at=? WHERE id=?", (now, trade_id))
 
 
+def void_trade(trade_id: int) -> None:
+    """Mark a trade void — entry order never filled. Not published, not counted in stats."""
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE trades SET status='void', closed_at=?, exit_reason='entry_unfilled' WHERE id=?",
+            (now, trade_id),
+        )
+
+
 def get_open_trades() -> list[dict]:
     with _conn() as conn:
         rows = conn.execute(

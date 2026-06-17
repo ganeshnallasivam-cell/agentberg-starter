@@ -20,6 +20,7 @@ import character
 import config as cfg
 import knowledge
 import memory
+import migrations
 import risk
 import structures
 from agentberg import AgentbergClient
@@ -70,10 +71,17 @@ def reconcile_ledger():
         return
     held = _alpaca.get_position_symbols()
     reconciled = 0
+    voided = 0
     for t in open_trades:
         legs = [s for s in (t.get("long_symbol"), t.get("short_symbol")) if s] or [t["symbol"]]
         if any(s in held for s in legs):
             continue   # still open at the broker
+
+        # Entry order never filled — phantom open. Void it, never publish.
+        if not _alpaca.was_entry_filled(t.get("order_id")):
+            memory.void_trade(t["id"])
+            voided += 1
+            continue
 
         long_sym = t.get("long_symbol") or t["symbol"]
         fill      = _alpaca.get_last_fill(long_sym, side="sell")
@@ -93,12 +101,15 @@ def reconcile_ledger():
         reconciled += 1
     if reconciled:
         print(f"[reconcile] Closed {reconciled} trade(s) from broker truth (server-side/offline exits)")
+    if voided:
+        print(f"[reconcile] Voided {voided} phantom trade(s) — entry order never filled")
 
 
 def run_session():
     """
     Full trading cycle. Call once at market open and once at close.
     """
+    migrations.run()
     memory.init_db()
     mode = cfg.STRATEGY_MODE
     print(f"\n[agent] {datetime.datetime.now():%Y-%m-%d %H:%M} | ID: {cfg.AGENT_ID} | Mode: {mode}")

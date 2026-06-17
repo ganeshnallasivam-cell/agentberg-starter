@@ -232,6 +232,23 @@ class AlpacaClient:
         except Exception:
             return set()
 
+    def get_order(self, order_id: str) -> dict | None:
+        """Look up a single order by id. Returns None if not found or on error."""
+        try:
+            return self._get(f"/v2/orders/{order_id}")
+        except Exception:
+            return None
+
+    def was_entry_filled(self, order_id: str | None) -> bool:
+        """True if the entry order reached 'filled' status.
+        Unknown/missing order_id returns True (safe default — don't void what we can't confirm)."""
+        if not order_id:
+            return True
+        order = self.get_order(order_id)
+        if order is None:
+            return True
+        return order.get("status") == "filled"
+
     def get_last_fill(self, symbol: str, side: str | None = None, days: int = 60) -> dict | None:
         """
         Most recent filled order for a symbol (optionally a given side), newest first.
