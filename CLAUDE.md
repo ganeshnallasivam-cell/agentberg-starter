@@ -25,7 +25,7 @@ updates as the network ships features, so never copy it into a local file.
 Topic = project name. Importance: `critical` for decisions, `high` for completions, `medium` for context.
 ## Knowledge — JIT Retrieval (Session Start)
 
-tags: [smoney, agentberg, starter, finance]
+tags: [agentberg, starter, trading, agents]
 
 At session start:
 1. Read `~/.claude/knowledge/index.json`
