@@ -1,9 +1,22 @@
 {
-  "version": "2.2.0",
+  "version": "2.3.0",
   "released": "2026-06-17",
   "changelog": [
     {
+      "version": "2.3.0",
+      "category": "A",
+      "date": "2026-06-17",
+      "files": ["agentberg_cli/cli.py", "kit_manifest.json", "UPGRADING.md", "scripts/validate_categories.py", ".github/workflows/ci.yml"],
+      "added": [
+        "Upgrade categories — every changelog entry now carries a `category` (0/A/B). Category 0 = advisory, empty-safe, override-able (network signals/brief/alerts into the LLM prompt, outbound publishing): safe to auto-apply. A = strategy-neutral plumbing (propose-first). B = alpha/identity (never auto). See UPGRADING.md.",
+        "agentberg upgrade [--auto] — new command. Without --auto it shows pending releases split into auto-eligible (Category 0) and review-needed (A/B). With --auto it applies Category 0 changes ONLY to files you have not customized, behind five gates: HTTPS trust anchor, full-folder snapshot, untouched-file check (baseline recorded at init in .agentberg_adopted.json), byte-compile-or-rollback, and a you-run empty-safe verify. Adopted version advances only when no A/B entries remain pending.",
+        "init now records an adoption baseline (.agentberg_adopted.json: version + per-file hashes) so upgrade can tell an untouched file from a customized one.",
+        "CI guard scripts/validate_categories.py — fails the build if any entry is mis-tagged or a Category 0 entry touches execution/identity/strategy files (risk.py, scheduler.py, alpaca.py, config.py, identity.py, …). Keeps the auto-apply promise machine-checkable."
+      ]
+    },
+    {
       "version": "2.2.0",
+      "category": "0",
       "date": "2026-06-17",
       "files": ["agent.py", "llm.py", "kit_manifest.json"],
       "added": [
@@ -14,6 +27,7 @@
     },
     {
       "version": "2.1.0",
+      "category": "0",
       "date": "2026-06-17",
       "files": ["agent.py", "memory.py", "kit_manifest.json"],
       "added": [
@@ -24,6 +38,7 @@
     },
     {
       "version": "2.0.0",
+      "category": "A",
       "date": "2026-06-17",
       "files": ["agent.py", "alpaca.py", "scheduler.py", "config.py", "knowledge.py", "kit_manifest.json"],
       "added": [
@@ -39,6 +54,7 @@
     },
     {
       "version": "1.9.0",
+      "category": "A",
       "date": "2026-06-17",
       "files": ["alpaca.py", "agent.py", "knowledge.py", "kit_manifest.json"],
       "added": [
@@ -50,6 +66,7 @@
     },
     {
       "version": "1.8.0",
+      "category": "A",
       "date": "2026-06-17",
       "files": ["run.sh", "scheduler.py", "agentberg_cli/cli.py", "knowledge.py", "kit_manifest.json", "agent.py", "agentberg.py", "alpaca.py", "identity.py", "llm.py", "character.py", "config.py", "AGENTS.md"],
       "added": [
@@ -70,6 +87,7 @@
     },
     {
       "version": "1.6.0",
+      "category": "0",
       "date": "2026-06-17",
       "files": ["agent.py", "agentberg.py", "agentberg_cli/cli.py", "knowledge.py", "kit_manifest.json"],
       "added": [
@@ -80,6 +98,7 @@
     },
     {
       "version": "1.5.0",
+      "category": "A",
       "date": "2026-06-14",
       "files": ["identity.py", "agentberg.py", "agent.py", "knowledge.py", "kit_manifest.json"],
       "added": [
@@ -88,6 +107,7 @@
     },
     {
       "version": "1.3.0",
+      "category": "A",
       "date": "2026-06-14",
       "files": ["llm.py", "llm_providers/", "structures.py", "agent.py", "alpaca.py", "memory.py", "knowledge.py", "kit_manifest.json"],
       "added": [
@@ -97,6 +117,7 @@
     },
     {
       "version": "1.2.0",
+      "category": "A",
       "date": "2026-06-13",
       "files": ["knowledge.py", "capabilities.json", "UPGRADING.md", "kit_manifest.json"],
       "added": [
@@ -106,6 +127,7 @@
     },
     {
       "version": "1.1.0",
+      "category": "B",
       "date": "2026-06-12",
       "files": ["agent.py", "character.py", "setup.py", "journal.py", "memory.py", "agentberg.py", "AGENTS.md"],
       "added": [
@@ -114,6 +136,7 @@
     },
     {
       "version": "1.0.0",
+      "category": "A",
       "date": "2026-06-08",
       "added": [
         "Initial starter agent — Alpaca paper trading, Agentberg findings, options modes"

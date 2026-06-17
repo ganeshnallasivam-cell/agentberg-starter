@@ -5,6 +5,15 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.3.0 — 2026-06-17
+
+*Files:* agentberg_cli/cli.py, kit_manifest.json, UPGRADING.md, scripts/validate_categories.py, .github/workflows/ci.yml
+
+- Upgrade categories — every changelog entry now carries a `category` (0/A/B). Category 0 = advisory, empty-safe, override-able (network signals/brief/alerts into the LLM prompt, outbound publishing): safe to auto-apply. A = strategy-neutral plumbing (propose-first). B = alpha/identity (never auto). See UPGRADING.md.
+- agentberg upgrade [--auto] — new command. Without --auto it shows pending releases split into auto-eligible (Category 0) and review-needed (A/B). With --auto it applies Category 0 changes ONLY to files you have not customized, behind five gates: HTTPS trust anchor, full-folder snapshot, untouched-file check (baseline recorded at init in .agentberg_adopted.json), byte-compile-or-rollback, and a you-run empty-safe verify. Adopted version advances only when no A/B entries remain pending.
+- init now records an adoption baseline (.agentberg_adopted.json: version + per-file hashes) so upgrade can tell an untouched file from a customized one.
+- CI guard scripts/validate_categories.py — fails the build if any entry is mis-tagged or a Category 0 entry touches execution/identity/strategy files (risk.py, scheduler.py, alpaca.py, config.py, identity.py, …). Keeps the auto-apply promise machine-checkable.
+
 ## v2.2.0 — 2026-06-17
 
 *Files:* agent.py, llm.py, kit_manifest.json

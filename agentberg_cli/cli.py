@@ -15,6 +15,7 @@ stdlib-only so it installs cleanly via pipx/uv with no build step.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -22,6 +23,8 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -95,12 +98,19 @@ def _folder(args) -> Path:
 
 # ── scaffolding ─────────────────────────────────────────────────────────────────
 
-def _download_kit(target: Path) -> None:
-    """Download the latest kit tarball and extract the editable files into target."""
-    print("  fetching the latest kit…")
+def _fetch_kit_bytes() -> bytes:
+    """Download the latest kit tarball over HTTPS (GitHub is the trust anchor)."""
     req = urllib.request.Request(KIT_TARBALL, headers={"User-Agent": "agentberg-cli"})
     with urllib.request.urlopen(req, timeout=60) as resp:   # follows redirects
-        data = resp.read()
+        return resp.read()
+
+
+def _extract_kit(data: bytes, target: Path, exclude: bool = True) -> None:
+    """Extract the editable kit files from a tarball into target (path-traversal safe).
+
+    exclude=True drops CLI/dev/packaging files (for the user's folder); exclude=False
+    extracts everything (used when staging the new kit to a temp dir for upgrade).
+    """
     target.mkdir(parents=True, exist_ok=True)
     target_root = target.resolve()
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
@@ -108,7 +118,7 @@ def _download_kit(target: Path) -> None:
         root = members[0].name.split("/")[0] if members else ""
         for m in members:
             rel = m.name[len(root) + 1:] if m.name.startswith(root + "/") else m.name
-            if not rel or rel.split("/")[0] in _SCAFFOLD_EXCLUDE:
+            if not rel or (exclude and rel.split("/")[0] in _SCAFFOLD_EXCLUDE):
                 continue
             dest = (target / rel).resolve()
             if not str(dest).startswith(str(target_root)):
@@ -120,6 +130,62 @@ def _download_kit(target: Path) -> None:
                 f = tar.extractfile(m)
                 if f:
                     dest.write_bytes(f.read())
+
+
+def _download_kit(target: Path) -> None:
+    """Download the latest kit tarball and extract the editable files into target."""
+    print("  fetching the latest kit…")
+    _extract_kit(_fetch_kit_bytes(), target)
+
+
+# ── upgrade (pull-to-review + Category 0 auto-apply) ──────────────────────────────
+
+ADOPTED_FILE = ".agentberg_adopted.json"
+# Folder entries that are local state, never kit code — excluded from baselining.
+_UPGRADE_IGNORE = {".env", ".git", "__pycache__", "logs", "agent.db", "agent.db-journal",
+                   ".agent_key", ADOPTED_FILE}
+
+
+def _vtuple(v: str) -> tuple:
+    return tuple(int(x) if x.isdigit() else 0 for x in str(v).split("."))
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _kit_file_hashes(target: Path) -> dict:
+    """sha256 of every kit file in the folder, by POSIX-relative path."""
+    hashes = {}
+    for p in sorted(target.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(target).as_posix()
+        top = rel.split("/")[0]
+        if top in _UPGRADE_IGNORE or top in _SCAFFOLD_EXCLUDE or rel.endswith(".pyc"):
+            continue
+        if rel.endswith(".command") or rel.endswith(".bat"):  # generated launcher
+            continue
+        hashes[rel] = _sha256(p)
+    return hashes
+
+
+def _load_adopted(folder: Path) -> dict:
+    try:
+        return json.loads((folder / ADOPTED_FILE).read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_adopted(folder: Path, data: dict) -> None:
+    (folder / ADOPTED_FILE).write_text(json.dumps(data, indent=2))
+
+
+def _folder_kit_version(folder: Path) -> str:
+    try:
+        return json.loads((folder / "kit_manifest.json").read_text()).get("version", "0.0.0")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return "0.0.0"
 
 
 # ── .env ────────────────────────────────────────────────────────────────────────
@@ -273,6 +339,10 @@ def cmd_init(args) -> None:
         sys.exit(f"{target} exists and is not empty — use --force to overwrite or pick --dir.")
 
     _download_kit(target)
+    # Record the adopted baseline: version + per-file hashes. Upgrade uses this to tell
+    # an untouched file (safe to auto-replace) from one the agent has customized.
+    _save_adopted(target, {"version": _folder_kit_version(target),
+                           "files": _kit_file_hashes(target)})
     llm = _choose_llm(args.llm, args.no_input)
     agent_id = _prompt("AGENT_ID (your agent's unique name): ", args.agent_id, args.no_input)
     key = _prompt("Alpaca PAPER API key (enter to skip): ", args.alpaca_key, args.no_input)
@@ -339,13 +409,146 @@ def cmd_chat(args) -> None:
         subprocess.run([shell, "-ilc", f'cd "{folder}" && exec {cmd}'], cwd=folder)
 
 
-def cmd_update(args) -> None:
+def _pending_entries(new_manifest: dict, adopted_version: str) -> list[dict]:
+    """Changelog entries newer than the adopted version, oldest-first."""
+    av = _vtuple(adopted_version)
+    entries = [e for e in new_manifest.get("changelog", []) if _vtuple(e.get("version", "0")) > av]
+    return sorted(entries, key=lambda e: _vtuple(e.get("version", "0")))
+
+
+def cmd_upgrade(args) -> None:
+    """Pull-to-review the latest kit. With --auto, apply Category 0 (advisory,
+    empty-safe, override-able) changes to UNTOUCHED files behind snapshot + verify."""
     folder = _folder(args)
-    print(f"Pull-to-review for: {folder}")
-    print("New kit code is never auto-applied. To adopt the latest safely, follow")
-    print("UPGRADING.md in your folder: it diffs the new version and proposes only")
-    print("strategy-neutral changes for your review. Check the latest version at")
-    print("https://agentberg.ai/kit/manifest")
+    auto = getattr(args, "auto", False)
+
+    adopted = _load_adopted(folder)
+    if not adopted:
+        # No baseline (older folder) — record the current state and stop. Without a
+        # baseline we cannot tell a customized file from an untouched one.
+        cur_ver = _folder_kit_version(folder)
+        _save_adopted(folder, {"version": cur_ver, "files": _kit_file_hashes(folder)})
+        print(f"Recorded current folder as baseline (v{cur_ver}). Re-run to upgrade.")
+        return
+
+    print("  fetching the latest kit…")
+    try:
+        data = _fetch_kit_bytes()
+    except Exception as e:
+        sys.exit(f"Could not fetch the kit: {e}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        newdir = Path(tmp) / "kit"
+        _extract_kit(data, newdir, exclude=False)
+        try:
+            new_manifest = json.loads((newdir / "kit_manifest.json").read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            sys.exit("Latest kit has no readable manifest — aborting.")
+
+        latest = new_manifest.get("version", "0.0.0")
+        if _vtuple(latest) <= _vtuple(adopted["version"]):
+            print(f"Already current (v{adopted['version']}).")
+            return
+
+        pending = _pending_entries(new_manifest, adopted["version"])
+        cat0 = [e for e in pending if str(e.get("category")) == "0"]
+        review = [e for e in pending if str(e.get("category")) != "0"]
+
+        print(f"\nUpgrade available: v{adopted['version']} → v{latest}")
+        print(f"  Category 0 (auto-apply, advisory/empty-safe): {len(cat0)} version(s)")
+        print(f"  Category A/B (manual review per UPGRADING.md):  {len(review)} version(s)")
+
+        if not auto:
+            for e in cat0:
+                print(f"\n  [0] v{e['version']} — would auto-apply:")
+                for line in e.get("added", []):
+                    print(f"        • {line[:100]}")
+            if review:
+                print("\n  Needs your review (run UPGRADING.md procedure):")
+                for e in review:
+                    print(f"     [{e.get('category','?')}] v{e['version']} ({', '.join(e.get('files', []))})")
+            print("\nRun `agentberg upgrade --auto` to apply the Category 0 changes safely.")
+            return
+
+        # ── AUTO-APPLY Category 0 ────────────────────────────────────────────────
+        if not cat0:
+            print("\nNothing to auto-apply (no Category 0 changes pending).")
+            if review:
+                print("Pending A/B changes need manual review — see UPGRADING.md.")
+            return
+
+        # GATE 1: snapshot the whole folder before touching anything.
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        backup = folder.parent / f"{folder.name}-backup-{ts}"
+        shutil.copytree(folder, backup)
+        print(f"\n  snapshot: {backup}")
+
+        # Files in scope = every file named by a Category 0 entry, de-duped.
+        files0: list[str] = []
+        for e in cat0:
+            for rel in e.get("files", []):
+                if rel not in files0:
+                    files0.append(rel)
+
+        applied, skipped, missing = [], [], []
+        for rel in files0:
+            src = newdir / rel
+            if not src.is_file():
+                missing.append(rel)
+                continue
+            cur = folder / rel
+            base_hash = adopted["files"].get(rel)
+            if cur.exists():
+                cur_hash = _sha256(cur)
+                if cur_hash == _sha256(src):
+                    continue  # already identical — no-op
+                # GATE 2: only replace files the agent has NOT customized.
+                if base_hash is not None and cur_hash != base_hash:
+                    skipped.append(rel)
+                    continue
+            cur.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, cur)
+            applied.append(rel)
+
+        # GATE 3: byte-compile any applied Python — a broken file rolls everything back.
+        pyfiles = [str(folder / r) for r in applied if r.endswith(".py")]
+        if pyfiles:
+            res = subprocess.run([sys.executable, "-m", "py_compile", *pyfiles],
+                                 capture_output=True, text=True)
+            if res.returncode != 0:
+                shutil.rmtree(folder)
+                shutil.move(str(backup), str(folder))
+                sys.exit(f"Compile failed after apply — rolled back from snapshot.\n{res.stderr}")
+
+        # Record new state. Advance the adopted version to latest ONLY if no A/B
+        # entries are still pending; otherwise keep it pinned so they stay flagged.
+        for rel in applied:
+            adopted["files"][rel] = _sha256(folder / rel)
+        if not review:
+            adopted["version"] = latest
+        _save_adopted(folder, adopted)
+
+        print(f"\n✓ Applied {len(applied)} file(s) from {len(cat0)} Category 0 release(s).")
+        for rel in applied:
+            print(f"    updated  {rel}")
+        for rel in skipped:
+            print(f"    skipped  {rel}  (you customized it — review manually)")
+        for rel in missing:
+            print(f"    missing  {rel}  (not in latest kit — skipped)")
+        if review:
+            print(f"\n  {len(review)} Category A/B release(s) still need manual review (UPGRADING.md):")
+            for e in review:
+                print(f"     [{e.get('category','?')}] v{e['version']}")
+            print(f"  Adopted version stays at v{adopted['version']} until those are reviewed.")
+        else:
+            print(f"\n  Now at v{latest}.")
+        print(f"\n  Verify: `agentberg run` once. With the network off, behavior should be")
+        print(f"  unchanged (Category 0 is advisory). Snapshot kept at {backup}")
+
+
+def cmd_update(args) -> None:
+    # `update` is the propose-only view; `upgrade --auto` applies Category 0.
+    cmd_upgrade(args)
 
 
 def main(argv=None) -> None:
@@ -372,6 +575,12 @@ def main(argv=None) -> None:
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("--dir", help="trader folder (default: the one from init)")
         sp.set_defaults(func=fn)
+
+    pu = sub.add_parser("upgrade", help="upgrade the kit; --auto applies Category 0 safely")
+    pu.add_argument("--dir", help="trader folder (default: the one from init)")
+    pu.add_argument("--auto", action="store_true",
+                    help="auto-apply Category 0 (advisory, empty-safe) changes to untouched files")
+    pu.set_defaults(func=cmd_upgrade)
 
     args = p.parse_args(argv)
     args.func(args)

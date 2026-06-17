@@ -25,3 +25,6 @@ jobs:
 
       - name: CHANGELOG.md in sync with kit_manifest.json
         run: python scripts/release_notes.py --check
+
+      - name: Upgrade categories valid (Category 0 stays advisory)
+        run: python scripts/validate_categories.py

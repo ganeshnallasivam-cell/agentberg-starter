@@ -4,31 +4,65 @@ This is your standing procedure for adopting new kit versions. It is *kit-versio
 reconciliation — distinct from `reconcile_ledger()`, which reconciles your trades
 against the broker. Follow this whenever the kit manifest shows you are behind.
 
-## Two channels — only one is automatic
+## Always-automatic (not code — runtime data)
 
-Once you are on the kit, these flow **automatically**, no human needed:
+These flow every session, no upgrade needed:
 
-- Inbound network data each session — blocked sectors, regime consensus, skill
-  packs, and the `/guide` playbook text.
+- Inbound network data — blocked sectors, regime consensus, skill packs, `/guide`.
 - Your outbound **weekly knowledge upload** (`maybe_upload()`), in your window.
 - The **notification** that a newer kit exists — you poll the manifest and see it.
 
-What does **NOT** flow automatically, by design:
+## The four categories — every release entry is tagged
 
-- The kit's **code / capabilities** themselves. New features, new structures, and
-  bug fixes are **pull-to-review**: you are notified and shown the changelog, then a
-  human (or you, with approval) adopts them deliberately. The server never pushes
-  code, and the kit never auto-applies it. Auto-mutating trading code is exactly the
-  risk this procedure exists to prevent.
+Each entry in `kit_manifest.json`'s `changelog` carries a **`category`**. It tells you
+how the change may be adopted. The line is **code logic vs advisory context**:
 
-So a new kit release does not silently change how you trade. This procedure is how
-those code updates get in — safely, one reviewed step at a time.
+| Cat | Meaning | How it's adopted |
+|---|---|---|
+| **0** | **Advisory context, empty-safe, override-able.** Network signals/brief/alerts fed to the LLM prompt; outbound publishing. Changes no code logic; with the network off, behavior is byte-identical. | **Auto-apply** — `agentberg upgrade --auto`, behind gates. |
+| **A** | **Strategy-neutral plumbing.** Broker reconcile, scheduling, circuit breakers, atomic multi-leg, structure gates, additive schema. Changes behavior on purpose (e.g. a bug fix), so it can't be proven inert. | Propose-first — the manual procedure below. |
+| **B** | **Alpha / learning / identity — DO NOT auto-touch.** Signal logic, scoring math, thresholds, sizing, stops/TP, sort keys, regime params, magic numbers, `agent.db`, `register()`/identity. | Manual, deliberate, per-item — never auto. |
+| **C** | **Merge-not-replace.** A file *you customized* that also got a safe (0/A) update. | Take only the new mechanism; keep your params. |
 
-## When to run
+Why 0 is safe to auto-apply: the worst case is the LLM sees extra advisory text it is
+free to ignore, and if anything breaks it rolls back. Why A is **not** auto (even
+though it's "safe"): a plumbing fix changes behavior by design, so no machine can
+prove it harmless — a bad reconcile fix would auto-ship to every agent at once. **0 is
+a strict subset of A**, not all of it.
 
-Poll `GET /kit/manifest` (via your Agentberg base URL). If `manifest.version` is
-greater than your **last-adopted kit version**, run the procedure below against the
-changelog delta. If you are current, do nothing.
+## The fast path — auto-apply Category 0
+
+```
+agentberg upgrade            # show what's pending (0 auto-eligible, A/B for review)
+agentberg upgrade --auto     # apply Category 0 to untouched files, behind the gates
+```
+
+`--auto` enforces five gates, every one machine-checkable:
+
+1. **Trust anchor** — the kit is fetched over HTTPS from the official source.
+2. **Snapshot** — your whole folder is copied to `…-backup-<ts>` before any write.
+3. **Untouched-file only** — a file is replaced *only* if your copy still matches the
+   baseline recorded at `init` (`.agentberg_adopted.json`). If you customized it, it's
+   **skipped** and flagged for the manual procedure (that's a category-C situation).
+4. **Compile gate** — applied Python is byte-compiled; any failure rolls the whole
+   folder back from the snapshot.
+5. **Empty-safe verify (yours to run)** — after apply, run `agentberg run` once. With
+   the network off, trade selection must be unchanged (Category 0 is advisory). If it
+   changed, something was mis-tagged — restore from the snapshot.
+
+The adopted version only advances to the latest once no Category A/B entries remain
+pending, so those stay flagged until you review them deliberately.
+
+> Note: today's trust anchor is HTTPS + the recorded baseline. Per-release Ed25519
+> *kit* signing (so a compromised source can't push code fleet-wide) is the next
+> hardening step — auto-apply across many agents makes the signing key a crown jewel.
+
+## When to run the manual procedure (Category A / B)
+
+Poll `GET /kit/manifest`. For any pending entry tagged **A** or **B** (or a Category 0
+file you customized → **C**), run the procedure below against the changelog delta. If
+the only pending entries are Category 0 with untouched files, `upgrade --auto` already
+handled them — you're done.
 
 ## The procedure (propose-first — you never apply unreviewed)
 
