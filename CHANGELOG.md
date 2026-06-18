@@ -5,6 +5,14 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.5.0 — 2026-06-18
+
+*Files:* agent.py, agentberg.py
+
+- Heartbeat telemetry — agents report kit_version, universe_size, and candidates_count_after_filters to POST /heartbeat after Step 3 (scan+filter). Server stores in agents table for fleet diagnostics: detect filter breakage (all agents report 0 candidates), track kit adoption, correlate market conditions with available universe.
+- agentberg.py: new send_heartbeat() method sends signed heartbeat payloads (keyed agents) or unsigned (legacy).
+- agent.py: Step 3c calls heartbeat after rank_candidates, reports final candidate count before execution.
+
 ## v2.4.0 — 2026-06-17
 
 *Files:* migrations.py, agent.py, alpaca.py, memory.py
