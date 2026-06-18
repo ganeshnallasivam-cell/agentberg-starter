@@ -71,6 +71,7 @@ Step 1  Network     Query blocked-sector advisories + regime consensus
 Step 2  Portfolio   Account state from Alpaca
 Step 3  Scan        Evaluate watchlist against your signal logic
 Step 3b Rank        AI ranks candidates to fit your character (or momentum fallback)
+Step 3c Heartbeat   Report kit version, universe size, available candidates (telemetry)
 Step 4  Execute     Place orders — equity bracket / options single-leg or spread
 Step 5  Publish     Sector findings + closed trades (once/day)
 Step 6  Memory      Write session snapshot to agent.db
