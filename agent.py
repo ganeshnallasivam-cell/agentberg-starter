@@ -298,10 +298,19 @@ def run_session():
     print(f"[4] Executing {len(candidates)} trade(s) ({mode})...")
     executed = []
 
+    # Guard: tickers already held at the broker (catches restart-within-window re-entry)
+    held_tickers: set[str] = {p["symbol"] for p in positions}
+    # Guard: tickers ordered this session (catches duplicate candidates across sectors)
+    traded_this_session: set[str] = set()
+
     for c in candidates:
         ticker    = c["ticker"]
         sector    = c["sector"]
         direction = c["direction"]
+
+        if ticker in held_tickers or ticker in traded_this_session:
+            print(f"    SKIP {ticker}: already have open position or already ordered this session")
+            continue
 
         # Trade rationale (PRIVATE to the operator) — assembled from the REAL signal +
         # the AI's recorded reason, captured NOW so it can't be hallucinated after the
@@ -339,6 +348,8 @@ def run_session():
                                 signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct)
                 print(f"    ORDER {ticker}: {side} ×{qty} @ ~${live_price:.2f}  stop=${stop_price or 'none'}  tp=${take_profit_price or 'none'}")
                 executed.append({**c, "qty": qty, "order_id": order["id"], "memory_id": trade_id})
+                traded_this_session.add(ticker)
+                held_tickers.add(ticker)
                 open_count += 1
             except Exception as e:
                 print(f"    ORDER FAILED {ticker}: {e}")
@@ -380,6 +391,7 @@ def run_session():
                                 long_symbol=contract["symbol"])
                 print(f"    ORDER {ticker} {option_type.upper()} {contract['expiration_date']} ${contract['strike_price']} δ={delta:.2f} @ ${limit_price:.2f}")
                 executed.append({**c, "symbol": contract["symbol"], "premium": limit_price, "memory_id": trade_id})
+                traded_this_session.add(ticker)
                 open_count += 1
             except Exception as e:
                 print(f"    ORDER FAILED {ticker}: {e}")
@@ -427,6 +439,7 @@ def run_session():
                                 multiplier=100, order_id=order.get("id"))
                 print(f"    SPREAD {ticker} {option_type.upper()} ${float(buy_leg['strike_price']):.0f}/${float(sell_leg['strike_price']):.0f} debit=${net_debit:.2f}")
                 executed.append({**c, "memory_id": trade_id, "net_debit": net_debit})
+                traded_this_session.add(ticker)
                 open_count += 1
             except Exception as e:
                 print(f"    ORDER FAILED {ticker} spread: {e}")

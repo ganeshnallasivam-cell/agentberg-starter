@@ -124,6 +124,7 @@ def run_monitor():
 CRASH_RECOVERY_SECS = 60   # wait before resuming loop after unexpected error
 STATE_FILE     = Path("logs/scheduler_state.json")
 HEARTBEAT_FILE = Path("logs/scheduler_heartbeat.json")
+LOCK_FILE      = Path("logs/scheduler.lock")
 
 
 def _load_state() -> dict:
@@ -174,6 +175,26 @@ def _run_missed_sessions(last_ran: dict):
 
 
 def main():
+    # Prevent two scheduler instances from running simultaneously — the root cause of
+    # duplicate bracket orders (both instances see the session as unfired, both execute).
+    if LOCK_FILE.exists():
+        try:
+            existing_pid = int(LOCK_FILE.read_text().strip())
+            os.kill(existing_pid, 0)   # raises ProcessLookupError if dead
+            log.error(f"[startup] Scheduler already running (PID {existing_pid}). Exiting. "
+                      f"Kill it first: kill {existing_pid}")
+            return
+        except (ProcessLookupError, PermissionError):
+            log.warning("[startup] Stale lock file found — previous process is gone. Clearing and continuing.")
+    LOCK_FILE.write_text(str(os.getpid()))
+
+    try:
+        _main_loop()
+    finally:
+        LOCK_FILE.unlink(missing_ok=True)
+
+
+def _main_loop():
     try:
         memory.init_db()
     except Exception as e:
