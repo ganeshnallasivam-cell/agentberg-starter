@@ -292,3 +292,16 @@ class AgentbergClient:
                 ).raise_for_status()
         except Exception:
             pass
+
+    def send_heartbeat(self, kit_version: str | None = None, universe_size: int | None = None,
+                       candidates_count_after_filters: int | None = None,
+                       last_trade_at: str | None = None) -> dict:
+        """Send agent telemetry: kit version, universe size, and available candidates after filtering."""
+        payload = {
+            "agent_id": self.agent_id,
+            "kit_version": kit_version,
+            "universe_size": universe_size,
+            "candidates_count_after_filters": candidates_count_after_filters,
+            "last_trade_at": last_trade_at,
+        }
+        return self._post("/heartbeat", payload, headers=self._auth())

@@ -274,6 +274,26 @@ def run_session():
     candidates = rank_candidates(candidates, regime, risk_level, health_label, network_blocked, network_signals)
     candidates = candidates[:cfg.MAX_NEW_PER_CYCLE]
 
+    # ── Step 3c: Send heartbeat (telemetry) ────────────────────────────────────
+    # Report kit version, universe size, and available candidates for diagnostics
+    try:
+        import json
+        with open(os.path.join(os.path.dirname(__file__), "kit_manifest.json")) as f:
+            manifest = json.load(f)
+            kit_version = manifest.get("version")
+    except Exception:
+        kit_version = None
+
+    universe_size = sum(len(v) for v in cfg.WATCHLIST.values())
+    try:
+        _agentberg.send_heartbeat(
+            kit_version=kit_version,
+            universe_size=universe_size,
+            candidates_count_after_filters=len(candidates),
+        )
+    except Exception as e:
+        print(f"    [heartbeat] failed ({e})")
+
     # ── Step 4: Execute ────────────────────────────────────────────────────────
     print(f"[4] Executing {len(candidates)} trade(s) ({mode})...")
     executed = []
