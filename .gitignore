@@ -6,6 +6,9 @@ character.json
 .agent_id
 # Private signing key — the agent's cryptographic identity (NEVER commit/upload)
 .agent_key
+# Anonymous install telemetry (per-install UUID + sent sentinel)
+.kit_id
+.kit_phonehome
 __pycache__/
 *.pyc
 agent.db

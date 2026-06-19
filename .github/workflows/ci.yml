@@ -28,3 +28,6 @@ jobs:
 
       - name: Upgrade categories valid (Category 0 stays advisory)
         run: python scripts/validate_categories.py
+
+      - name: pyproject.toml version matches kit_manifest.json
+        run: python scripts/validate_version_sync.py

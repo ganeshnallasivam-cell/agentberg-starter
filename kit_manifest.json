@@ -1,7 +1,20 @@
 {
-  "version": "2.5.1",
-  "released": "2026-06-18",
+  "version": "2.5.2",
+  "released": "2026-06-19",
   "changelog": [
+    {
+      "version": "2.5.2",
+      "category": "0",
+      "date": "2026-06-19",
+      "files": ["agentberg.py", "agent.py", "agentberg_cli/cli.py"],
+      "added": [
+        "Install telemetry (3-layer funnel capture): closes the clone→activation gap. Fires anonymously so the platform knows how many of the 320 GitHub cloners actually ran the kit.",
+        "agentberg.py: phone_home(kit_id, source, platform) — posts to POST /telemetry/install. Fire-and-forget, never raises.",
+        "agent.py: _phone_home() — generates a random UUID as .kit_id on first run, posts to /telemetry/install (source=agent_first_run). Writes .kit_phonehome sentinel after success so it fires exactly once.",
+        "agentberg_cli/cli.py: _phone_home_cli() — fires at `agentberg init` time (source=cli_init). Stores kit_id in ~/.agentberg/kit_id. Captures installs that come via the CLI before the agent is ever run.",
+        "agent.py: _ensure_registered() enhanced — retries once on network error (3s delay) before giving up, with clear log output so unregistered-agent state is visible rather than silent."
+      ]
+    },
     {
       "version": "2.5.1",
       "category": "A",

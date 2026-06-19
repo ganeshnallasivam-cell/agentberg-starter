@@ -15,6 +15,8 @@ You are responsible for all trading decisions and outcomes.
 
 import datetime
 import os
+import sys
+import time
 
 import character
 import config as cfg
@@ -32,27 +34,58 @@ _alpaca    = AlpacaClient(cfg.ALPACA_API_KEY, cfg.ALPACA_SECRET_KEY, cfg.ALPACA_
 _agentberg = AgentbergClient(cfg.AGENTBERG_URL, cfg.AGENT_ID)
 
 
+def _phone_home() -> None:
+    """Fire-once anonymous activation ping. Identifies that this kit was run without
+    any PII — just a random UUID tied to this install, timestamp, and platform.
+    Writes .kit_phonehome after success so it never fires again."""
+    sentinel = os.path.join(os.path.dirname(__file__), ".kit_phonehome")
+    if os.path.exists(sentinel):
+        return
+    id_file = os.path.join(os.path.dirname(__file__), ".kit_id")
+    if os.path.exists(id_file):
+        with open(id_file) as f:
+            kit_id = f.read().strip()
+    else:
+        import uuid
+        kit_id = str(uuid.uuid4())
+        with open(id_file, "w") as f:
+            f.write(kit_id)
+    try:
+        _agentberg.phone_home(kit_id=kit_id, source="agent_first_run", platform=sys.platform)
+        open(sentinel, "w").close()
+    except Exception:
+        pass
+
+
 def _ensure_registered():
-    """One-time: claim our id on the network. If it was already taken, the network
-    assigns a UNIQUE one — we persist it to .agent_id, adopt it for this session, and
-    tell the operator. After that, config.py loads the confirmed id automatically."""
+    """One-time: claim our id on the network. Retries once on network error so a brief
+    outage at startup doesn't leave the agent permanently unregistered.
+    If it was already taken, the network assigns a UNIQUE variant — we persist it to
+    .agent_id and adopt it. After that, config.py loads the confirmed id automatically."""
     idfile = os.path.join(os.path.dirname(__file__), ".agent_id")
     if os.path.exists(idfile):
         return  # already registered
-    try:
-        res = _agentberg.register(cfg.AGENT_ID)
-    except Exception as e:
-        print(f"    [register] skipped ({e}) — using '{cfg.AGENT_ID}'")
-        return
-    confirmed = res.get("agent_id", cfg.AGENT_ID)
-    with open(idfile, "w") as f:
-        f.write(confirmed)
-    if res.get("reassigned"):
-        print(f"    [register] ⚠  {res.get('message', '')}")
-        cfg.AGENT_ID = confirmed          # adopt it for the rest of this session
-        _agentberg.agent_id = confirmed
-    else:
-        print(f"    [register] id '{confirmed}' is yours")
+    for attempt in (1, 2):
+        try:
+            res = _agentberg.register(cfg.AGENT_ID)
+            confirmed = res.get("agent_id", cfg.AGENT_ID)
+            with open(idfile, "w") as f:
+                f.write(confirmed)
+            if res.get("reassigned"):
+                print(f"    [register] ⚠  {res.get('message', '')}")
+                cfg.AGENT_ID = confirmed
+                _agentberg.agent_id = confirmed
+            else:
+                print(f"    [register] id '{confirmed}' is yours on Agentberg")
+            return
+        except Exception as e:
+            if attempt == 1:
+                print(f"    [register] network error ({type(e).__name__}) — retrying in 3s…")
+                time.sleep(3)
+            else:
+                print(f"    [register] ⚠  could not reach Agentberg — running unregistered")
+                print(f"    [register]    findings won't appear on the network until this resolves")
+                print(f"    [register]    restart the agent to retry registration")
 
 
 def reconcile_ledger():
@@ -113,6 +146,7 @@ def run_session():
     """
     migrations.run()
     memory.init_db()
+    _phone_home()
     mode = cfg.STRATEGY_MODE
     print(f"\n[agent] {datetime.datetime.now():%Y-%m-%d %H:%M} | ID: {cfg.AGENT_ID} | Mode: {mode}")
     if not character.is_set():

@@ -371,6 +371,22 @@ class AgentbergClient:
             print(f"[agentberg] close_trade failed: {e}")
             return None
 
+    def phone_home(self, kit_id: str, kit_version: str | None = None,
+                   source: str | None = None, platform: str | None = None) -> None:
+        """Anonymous fire-once activation ping. Never raises — failure is silently ignored."""
+        try:
+            import time as _t
+            payload: dict = {"kit_id": kit_id, "ts": int(_t.time())}
+            if kit_version:
+                payload["kit_version"] = kit_version
+            if source:
+                payload["source"] = source
+            if platform:
+                payload["platform"] = platform
+            self._post("/telemetry/install", payload)
+        except Exception:
+            pass
+
     def send_heartbeat(self, kit_version: str | None = None, universe_size: int | None = None,
                        candidates_count_after_filters: int | None = None,
                        last_trade_at: str | None = None) -> dict:

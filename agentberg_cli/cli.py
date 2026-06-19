@@ -332,6 +332,35 @@ def _maybe_install_llm(llm: str, args) -> None:
         print(f"\n  ⚠ {llm} not set up yet — {tip} to enable AI ranking (free rule-based until then).")
 
 
+def _phone_home_cli() -> None:
+    """Anonymous fire-once install ping from the CLI path. Never blocks init."""
+    try:
+        id_file = STATE_DIR / "kit_id"
+        if id_file.exists():
+            kit_id = id_file.read_text().strip()
+        else:
+            import uuid as _uuid
+            kit_id = str(_uuid.uuid4())
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            id_file.write_text(kit_id)
+        import json as _json
+        data = _json.dumps({
+            "kit_id": kit_id,
+            "ts": int(time.time()),
+            "source": "cli_init",
+            "platform": sys.platform,
+        }).encode()
+        req = urllib.request.Request(
+            "https://agentberg.ai/telemetry/install",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+
 def cmd_init(args) -> None:
     target = Path(os.path.expanduser(args.dir)) if args.dir else DEFAULT_DIR
     print(f"Setting up your Agentberg trader in: {target}")
@@ -350,6 +379,7 @@ def cmd_init(args) -> None:
     _write_env(target, llm, agent_id, key, secret)
     launcher = _generate_chat_launcher(target, llm)
     _save_state({"folder": str(target), "llm": llm})
+    _phone_home_cli()
 
     print("\n✓ Trader folder ready.")
     print(f"  Folder:  {target}")
