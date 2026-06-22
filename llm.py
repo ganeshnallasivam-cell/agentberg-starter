@@ -37,6 +37,45 @@ _ADAPTERS = {
 _AUTO_ORDER = ["claude", "gemini", "openai", "deepseek"]
 
 
+def _performance_section(performance_context: dict | None) -> str:
+    """Render the agent's own historical track record for the prompt. This is the
+    reflection layer — the LLM sees how previous decisions actually performed before
+    ranking new candidates, so it can improve toward operator goals over time."""
+    if not performance_context:
+        return ""
+    lines = ["\nYour track record (reflection — use this to improve, not just as context):"]
+
+    stats = performance_context.get("stats") or {}
+    if stats.get("total_trades", 0) > 0:
+        lines.append(
+            f"- Overall: {stats['win_rate']:.0%} WR over {stats['total_trades']} trades "
+            f"| Net P&L ${stats['net_pnl']:+,.0f}"
+        )
+
+    sectors = performance_context.get("sectors") or []
+    winners = [s for s in sectors if s["trade_count"] >= 3 and s["win_rate"] >= 0.60]
+    losers  = [s for s in sectors if s["trade_count"] >= 3 and s["win_rate"] <= 0.40]
+    if winners:
+        lines.append("- Your proven sectors (favour these): " +
+                     ", ".join(f"{s['sector']} {s['win_rate']:.0%} WR" for s in winners))
+    if losers:
+        lines.append("- Your losing sectors (be cautious — your own evidence, not just the network): " +
+                     ", ".join(f"{s['sector']} {s['win_rate']:.0%} WR ${s['net_pnl']:+,.0f}" for s in losers))
+
+    recent = performance_context.get("recent") or []
+    closed = [t for t in recent if t.get("status") == "closed"][:5]
+    if closed:
+        lines.append("- Last closed trades (thesis vs outcome):")
+        for t in closed:
+            exp = t.get("expected_pct") or 0
+            act = t.get("pnl_pct") or 0
+            verdict = "HIT" if act >= 0 else "MISSED"
+            thesis_snippet = (t.get("entry_thesis") or "no thesis")[:80]
+            lines.append(f"    • {t['symbol']}: {verdict} — expected {exp:+.1%}, got {act:+.1%} | {thesis_snippet}")
+
+    return "\n".join(lines) + "\n"
+
+
 def _network_section(network_signals: dict | None) -> str:
     """Render Agentberg network intelligence for the prompt. Empty when unavailable —
     the agent leverages the network's collective learning when it's there, ignores it
@@ -79,9 +118,14 @@ def _network_section(network_signals: dict | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors, network_signals=None) -> str:
-    return f"""You are a disciplined trading agent reviewing candidates.
+def _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors,
+                  network_signals=None, performance_context=None) -> str:
+    return f"""You are a disciplined autonomous trading agent reviewing candidates.
 
+You are NOT making a one-time decision. You are an agent that improves toward your
+operator's goals over time. Review your own track record below and use it — not just
+market signals — to decide which candidates are worth trading NOW.
+{_performance_section(performance_context)}
 Market context:
 - Regime: {regime or "unknown"}
 - Risk level: {risk_level or "unknown"}
@@ -93,13 +137,14 @@ Market context:
 Candidates:
 {json.dumps(candidates, indent=2)}
 
-Review each candidate. Honor the operator's character above. Keep at most {cfg.MAX_NEW_PER_CYCLE}. Skip if
-the move is extremely weak (< 0.1%). Be cautious on the
-network-flagged sectors above — discount them, but they are advisory, not a hard block.
-Prefer stronger moves and sectors with tailwinds.
+Review each candidate. Honor the operator's character above. Keep at most {cfg.MAX_NEW_PER_CYCLE}.
+Skip if the move is extremely weak (< 0.1%). Weigh your own sector track record heavily —
+if you've consistently lost in a sector, that matters more than a single network advisory.
+Prefer stronger moves in sectors where your own evidence shows edge.
 
 Return a JSON array of candidates to TRADE, priority order.
-Each object: ticker, sector, direction, price, day_change, reason (one sentence).
+Each object: ticker, sector, direction, price, day_change, reason (one sentence — include
+whether your own track record in this sector is a factor in the decision).
 JSON only — no text, no markdown, no code fences outside the array."""
 
 
@@ -144,6 +189,7 @@ def rank_candidates(
     health_label: str,
     blocked_sectors: list[str],
     network_signals: dict | None = None,
+    performance_context: dict | None = None,
 ) -> list[dict]:
     """
     Ask the configured AI provider to review candidates and return only the ones worth
@@ -153,6 +199,11 @@ def rank_candidates(
     network_signals (optional): the network's collective intelligence — brief verdict,
     validated entry signals, consensus alerts, rotation/narrative — injected as ADVISORY
     context so the agent leverages other agents' learning without being bound by it.
+
+    performance_context (optional): the agent's own historical track record — overall
+    stats, sector-level performance, recent trade outcomes vs thesis. This is the
+    reflection layer: the LLM sees how its past decisions performed and uses that to
+    improve toward the operator's goals, not just make another point-in-time call.
     """
     if not candidates:
         return candidates
@@ -163,7 +214,8 @@ def rank_candidates(
     if adapter is None:
         return candidates
 
-    prompt = _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors, network_signals)
+    prompt = _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors,
+                           network_signals, performance_context)
     try:
         raw = adapter.run(prompt)
         payload = _extract_json_array(raw)

@@ -33,6 +33,9 @@ from llm import rank_candidates
 _alpaca    = AlpacaClient(cfg.ALPACA_API_KEY, cfg.ALPACA_SECRET_KEY, cfg.ALPACA_BASE_URL)
 _agentberg = AgentbergClient(cfg.AGENTBERG_URL, cfg.AGENT_ID)
 
+# Populated in run_daily(); read by _vote_outcome() at trade close
+_finding_ticker_map: dict[str, str] = {}
+
 
 def _phone_home() -> None:
     """Fire-once anonymous activation ping. Identifies that this kit was run without
@@ -224,12 +227,14 @@ def run_session():
         print(f"    Network entry signal (weight {top.get('weight', '?')}x): {top.get('claim', '')[:80]}")
 
     # Build finding ticker map: {ticker: finding_id} (highest-weight finding per ticker)
+    global _finding_ticker_map
     finding_ticker_map: dict[str, str] = {}
     finding_tickers_data = _agentberg.get_finding_tickers()
     for item in finding_tickers_data:
         for t in item.get("tickers", []):
             if t not in finding_ticker_map:  # already sorted weight DESC
                 finding_ticker_map[t] = str(item["finding_id"])
+    _finding_ticker_map = finding_ticker_map
     if finding_ticker_map:
         print(f"    Finding ticker queue: {len(finding_ticker_map)} ticker(s) from {len(finding_tickers_data)} network finding(s)")
 
@@ -346,10 +351,41 @@ def run_session():
         candidate_tickers.add(fk_ticker)
         added_from_network += 1
 
+    print(f"    {len(candidates)} candidate(s) before enrichment")
+
+    # ── Step 3a: Enrich candidates with agentberg ticker intelligence ──────────
+    # Each candidate gets the network's collective verdict: trade stats from all
+    # agents (WR, net P&L, count) + related findings count. Attached as
+    # network_intel dict — flows directly into the ranking prompt so the LLM sees
+    # what the whole network has experienced with this ticker before it decides.
+    if candidates:
+        enriched = 0
+        for c in candidates:
+            brief = _agentberg.get_ticker_brief(c["ticker"])
+            if brief:
+                c["network_intel"] = {
+                    "verdict":       brief["ticker_stats"]["verdict"],
+                    "network_wr":    brief["ticker_stats"]["win_rate"],
+                    "network_pnl":   brief["ticker_stats"]["net_pnl"],
+                    "trade_count":   brief["ticker_stats"]["trade_count"],
+                    "findings_count": len(brief.get("findings", [])),
+                }
+                enriched += 1
+        print(f"    Enriched {enriched}/{len(candidates)} candidates with network ticker intel")
+
     print(f"    {len(candidates)} candidate(s) before LLM filter")
 
-    # ── Step 3b: LLM ranking (optional) ───────────────────────────────────────
-    candidates = rank_candidates(candidates, regime, risk_level, health_label, network_blocked, network_signals)
+    # ── Step 3b: LLM ranking with self-reflection ─────────────────────────────
+    # The agent reviews its own track record before ranking — this is the reflection
+    # loop: win rates, sector P&L, last 5 closed trades vs their thesis. Without this,
+    # every ranking call starts blind, unable to improve toward the operator's goals.
+    performance_context = {
+        "stats":   memory.get_summary_stats(days=90),
+        "sectors": memory.get_sector_performance(days=90),
+        "recent":  memory.get_recent_trades(limit=10),
+    }
+    candidates = rank_candidates(candidates, regime, risk_level, health_label,
+                                 network_blocked, network_signals, performance_context)
     candidates = candidates[:cfg.MAX_NEW_PER_CYCLE]
 
     # ── Step 3c: Send heartbeat (telemetry) ────────────────────────────────────
@@ -575,21 +611,41 @@ def run_session():
     except Exception as e:
         print(f"[8] Knowledge upload skipped ({e})")
 
-    # ── Step 9: Pull-to-review — surface a newer kit version, never auto-apply ──
+    # ── Step 9: Kit version check — mandatory Cat 0/A must be adopted for fleet consistency ──
     try:
         upd = knowledge.check_kit_update(_agentberg)
         if upd.get("status") == "update_available":
-            print(f"[9] Kit update available: v{upd['latest']} (you have v{upd['current']}) — review before adopting:")
-            for entry in upd["changes"]:
-                for item in entry.get("added", []):
-                    print(f"      + {item}")
-            print("      Adopt via UPGRADING.md — copy reviewed files in; never auto-apply to a live agent.")
+            mandatory = upd.get("mandatory_changes", [])
+            optional = upd.get("optional_changes", [])
+            print(f"[9] Kit update: v{upd['current']} → v{upd['latest']}")
+            if mandatory:
+                print(f"    !! MANDATORY ({len(mandatory)} change(s) — Cat 0/A — network participation + safe plumbing):")
+                for entry in mandatory:
+                    for item in entry.get("added", [])[:2]:
+                        print(f"       + v{entry.get('version','?')}: {item}")
+                print("       Adopt these now — UPGRADING.md fast path (agentberg upgrade --auto for Cat 0).")
+            if optional:
+                print(f"    -- Optional ({len(optional)} change(s) — Cat B/C — review before adopting):")
+                for entry in optional[:3]:
+                    for item in entry.get("added", [])[:1]:
+                        print(f"       + v{entry.get('version','?')}: {item}")
     except Exception as e:
         print(f"[9] Update check skipped ({e})")
 
     stats = memory.get_summary_stats()
     print(f"[done] {len(executed)} orders placed | All-time: {stats['total_trades']} trades, "
           f"{stats['win_rate']:.0%} WR, ${stats['net_pnl']:+,.2f} P&L")
+
+    # ── Reflection — am I moving toward the operator's goal? ──────────────────
+    recent_stats = memory.get_summary_stats(days=14)
+    if recent_stats["total_trades"] >= 3:
+        losing_sectors = memory.get_losing_sectors(min_trades=3, max_wr=0.40)
+        winning_sectors = memory.get_winning_sectors(min_trades=3, min_wr=0.60)
+        print(f"[reflect] Last 14 days: {recent_stats['win_rate']:.0%} WR, ${recent_stats['net_pnl']:+,.0f} P&L")
+        if winning_sectors:
+            print(f"[reflect] Edge confirmed: {', '.join(winning_sectors)}")
+        if losing_sectors:
+            print(f"[reflect] Consistent losers (consider excluding): {', '.join(losing_sectors)}")
 
 
 def check_positions():
@@ -650,7 +706,7 @@ def check_positions():
             print(f"    [journal] {trade['symbol']} closed {net_pct:+.1%} ({reason}) — review with `python journal.py`")
             if trade.get("network_trade_id"):
                 _agentberg.close_trade(trade["network_trade_id"], pnl=net_pl_dollars, pnl_pct=net_pct, exit_reason=reason)
-            _vote_sector_outcome(trade, net_pl_dollars)
+            _vote_outcome(trade, net_pl_dollars)
         except Exception as e:
             print(f"[monitor] Spread close failed {trade['symbol']}: {e}")
         handled.update([long_sym, short_sym])
@@ -697,21 +753,33 @@ def _record_close(symbol: str, reason: str, pnl_pct: float):
     print(f"    [journal] {symbol} closed {pnl_pct:+.1%} ({reason}) — review with `python journal.py`")
     if trade.get("network_trade_id"):
         _agentberg.close_trade(trade["network_trade_id"], pnl=pnl_dollars, pnl_pct=pnl_pct, exit_reason=reason)
-    _vote_sector_outcome(trade, pnl_dollars)
+    _vote_outcome(trade, pnl_dollars)
 
 
-def _vote_sector_outcome(trade: dict, pnl_dollars: float):
-    """Vote on the sector_failure finding that blocked (or didn't block) this sector.
-    Loss in a blocked sector → upvote (block was right); win → downvote (block may be wrong)."""
+def _vote_outcome(trade: dict, pnl_dollars: float):
+    """Vote on any active network findings that apply to this closed trade.
+
+    Sector: if the trade's sector had an active block finding, vote on it.
+    Ticker: if the trade's symbol has a network finding, vote on that too.
+    Loss → upvote (finding was right); win → downvote (finding may be wrong).
+    """
+    vote = "up" if pnl_dollars < 0 else "down"
+
+    # 1. Sector finding
     sector = trade.get("sector")
-    if not sector:
-        return
-    blocked_map = _agentberg.get_blocked_sectors()
-    finding_id  = blocked_map.get(sector)
-    if finding_id:
-        vote = "up" if pnl_dollars < 0 else "down"
-        _agentberg.cast_vote(finding_id, vote)
-        print(f"    [vote] {vote}voted {sector} sector_failure (finding {finding_id})")
+    if sector:
+        blocked_map = _agentberg.get_blocked_sectors()
+        sector_finding_id = blocked_map.get(sector)
+        if sector_finding_id:
+            _agentberg.cast_vote(sector_finding_id, vote)
+            print(f"    [vote] {vote}voted {sector} sector_failure (finding {sector_finding_id})")
+
+    # 2. Ticker finding
+    ticker = trade.get("symbol")
+    if ticker and ticker in _finding_ticker_map:
+        ticker_finding_id = _finding_ticker_map[ticker]
+        _agentberg.cast_vote(ticker_finding_id, vote)
+        print(f"    [vote] {vote}voted {ticker} ticker finding (finding {ticker_finding_id})")
 
 
 def _maybe_publish(blocked_sectors: list[str], regime: str | None):

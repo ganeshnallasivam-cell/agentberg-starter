@@ -1,7 +1,20 @@
 {
-  "version": "2.7.2",
+  "version": "2.7.3",
   "released": "2026-06-22",
   "changelog": [
+    {
+      "version": "2.7.3",
+      "category": "0",
+      "date": "2026-06-22",
+      "files": [
+        "knowledge.py",
+        "agent.py"
+      ],
+      "added": [
+        "check_kit_update() now classifies pending changes into mandatory_changes (Cat 0/A — network telemetry, safe plumbing) and optional_changes (Cat B/C — strategy/alpha). Fleet consistency fix: agents can no longer silently skip mandatory changes by treating all upgrades as optional.",
+        "Step 9 upgrade display now shows MANDATORY vs Optional separately with explicit adoption guidance for mandatory items. Cat 0 items call out the agentberg upgrade --auto fast path."
+      ]
+    },
     {
       "version": "2.7.2",
       "category": "B",

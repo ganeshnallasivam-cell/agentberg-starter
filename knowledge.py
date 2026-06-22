@@ -112,7 +112,12 @@ def maybe_upload(client, agent_id: str, token: str | None = None) -> dict:
 # This kit's version. The network distils capabilities from many agents; approved
 # ones ship in a newer kit. We only ever NOTIFY — adopting is deliberate (see UPGRADING.md)
 # and operator-reviewed. A running, money-touching agent is never silently rewritten.
-KIT_VERSION = "2.5.0"
+KIT_VERSION = "2.7.3"
+
+# Category 0 and A changes are mandatory — they affect network participation
+# (telemetry, publishing, voting) or safe plumbing and must be adopted for the
+# fleet to operate consistently. Category B (strategy/alpha code) is opt-in only.
+MANDATORY_CATEGORIES = {"0", "A"}
 
 
 def _ver(s: str) -> tuple:
@@ -123,18 +128,29 @@ def _ver(s: str) -> tuple:
 
 
 def check_kit_update(client) -> dict:
-    """Ask Agentberg for the latest kit version. Returns the changelog of anything
-    newer than KIT_VERSION (review-only) — never applies it."""
+    """Ask Agentberg for the latest kit version.
+
+    Returns changelog entries classified into mandatory (Cat 0/A) and optional (Cat B/C).
+    Never applies changes — surfacing only.
+    """
     try:
         manifest = client._get("/kit/manifest")
     except Exception as e:
         return {"status": "unknown", "error": str(e)}
     latest = manifest.get("version", "")
     if _ver(latest) > _ver(KIT_VERSION):
-        changes = [
+        pending = [
             e for e in manifest.get("changelog", [])
             if _ver(e.get("version", "")) > _ver(KIT_VERSION)
         ]
-        return {"status": "update_available", "current": KIT_VERSION,
-                "latest": latest, "changes": changes}
+        mandatory = [e for e in pending if e.get("category", "B") in MANDATORY_CATEGORIES]
+        optional = [e for e in pending if e.get("category", "B") not in MANDATORY_CATEGORIES]
+        return {
+            "status": "update_available",
+            "current": KIT_VERSION,
+            "latest": latest,
+            "mandatory_changes": mandatory,
+            "optional_changes": optional,
+            "changes": pending,  # kept for backwards compat
+        }
     return {"status": "up_to_date", "version": KIT_VERSION}
