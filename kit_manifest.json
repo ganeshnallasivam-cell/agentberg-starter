@@ -1,7 +1,17 @@
 {
-  "version": "2.7.8",
+  "version": "2.7.9",
   "released": "2026-06-23",
   "changelog": [
+    {
+      "version": "2.7.9",
+      "category": "B",
+      "date": "2026-06-23",
+      "files": ["agent.py", "agentberg.py", "knowledge.py", "llm.py", "thesis_catalog.json"],
+      "added": [
+        "Thesis-driven catalog sync: agent builds a structured session thesis (instruments, sectors, tickers, strategy, regime) at boot and syncs a lightweight skill catalog from the server (/catalog/sync). Local matching identifies all relevant skills without a server round-trip. Up to 5 thesis/commodity skills are fetched per session and injected into the LLM ranking context as advisory intelligence. Sector skills are prioritised last — thesis skills (highest discovery value) are fetched first. Result: the agent automatically gains relevant skill context as the catalog grows, without manual configuration.",
+        "thesis_catalog.json: local catalog cache. Ships empty; populated on first boot sync. Subsequent syncs use last_synced_at to receive only the delta."
+      ]
+    },
     {
       "version": "2.7.8",
       "category": "0",

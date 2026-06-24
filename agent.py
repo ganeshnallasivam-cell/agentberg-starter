@@ -205,6 +205,27 @@ def run_session():
 
     effective_position_pct = position_size_override or cfg.MAX_POSITION_PCT
 
+    # ── Step 0b: Catalog sync — thesis-driven skill discovery ─────────────────
+    # Build session thesis from live config + current regime, sync catalog from
+    # server, match locally, fetch content for newly relevant thesis/commodity
+    # skills. All non-binding: flows into LLM context as advisory intelligence.
+    print("[0b] Syncing skill catalog...")
+    session_thesis = knowledge.build_session_thesis(cfg.STRATEGY_MODE, cfg.WATCHLIST, regime)
+    catalog_skills: dict = {}
+    try:
+        catalog_result = knowledge.sync_catalog(_agentberg, session_thesis)
+        catalog_skills = catalog_result.get("fetched_skills") or {}
+        matched_count  = len(catalog_result.get("matched") or [])
+        new_ids        = catalog_result.get("newly_discovered") or []
+        sectors_abbr   = ", ".join(session_thesis["sectors"][:3])
+        suffix         = "..." if len(session_thesis["sectors"]) > 3 else ""
+        print(f"    Thesis: {session_thesis['strategy']} | sectors: {sectors_abbr}{suffix}")
+        print(f"    Catalog: {matched_count} relevant skill(s) matched | {len(catalog_skills)} fetched into context")
+        if new_ids:
+            print(f"    New to catalog since last sync: {', '.join(new_ids[:5])}")
+    except Exception as e:
+        print(f"    [catalog] failed ({e}) — continuing without catalog skills")
+
     # ── Step 1: Network intelligence ──────────────────────────────────────────
     print("[1] Querying Agentberg network...")
     network_blocked_map = _agentberg.get_blocked_sectors()          # {sector: finding_id}
@@ -260,11 +281,12 @@ def run_session():
     rotation  = _agentberg.get_skill("rotation") or {}
     narrative = _agentberg.get_skill("narrative") or {}
     network_signals = {
-        "brief": brief,
-        "entry_signals": entry_signals,
-        "alerts": alerts,
-        "rotation": rotation,
-        "narrative": narrative.get("summary") if isinstance(narrative, dict) else narrative,
+        "brief":          brief,
+        "entry_signals":  entry_signals,
+        "alerts":         alerts,
+        "rotation":       rotation,
+        "narrative":      narrative.get("summary") if isinstance(narrative, dict) else narrative,
+        "catalog_skills": catalog_skills,
     }
 
     # ── Step 2: Portfolio state ────────────────────────────────────────────────

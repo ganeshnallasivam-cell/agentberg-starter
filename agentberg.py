@@ -384,6 +384,29 @@ class AgentbergClient:
             print(f"[agentberg] close_trade failed: {e}")
             return None
 
+    def catalog_sync(self, since: str | None = None) -> dict:
+        """Fetch the lightweight skill catalog index from the server.
+
+        Pass since=<last_synced_at> to receive only entries added after that timestamp.
+        First call (since=None) returns the full catalog. Returns {"entries": [], ...} on failure.
+        """
+        try:
+            params = {}
+            if since:
+                params["since"] = since
+            return self._get("/catalog/sync", params=params or None)
+        except Exception as e:
+            print(f"[agentberg] catalog_sync failed: {e}")
+            return {"entries": [], "catalog_version": None, "catalog_updated_at": None}
+
+    def get_catalog_skill(self, skill_id: str) -> dict | None:
+        """Fetch full content for a single catalog skill by ID."""
+        try:
+            return self._get(f"/skills/catalog/{skill_id}")
+        except Exception as e:
+            print(f"[agentberg] get_catalog_skill({skill_id}) failed: {e}")
+            return None
+
     def phone_home(self, kit_id: str, kit_version: str | None = None,
                    source: str | None = None, platform: str | None = None) -> None:
         """Anonymous fire-once activation ping. Never raises — failure is silently ignored."""

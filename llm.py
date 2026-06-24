@@ -117,6 +117,24 @@ def _network_section(network_signals: dict | None) -> str:
     if narrative:
         lines.append(f"- Market narrative: {str(narrative)[:200]}")
 
+    catalog_skills = network_signals.get("catalog_skills") or {}
+    if catalog_skills:
+        lines.append(f"\nThesis-matched skill intelligence ({len(catalog_skills)} skill(s) selected for your strategy):")
+        for skill_id, skill in catalog_skills.items():
+            title   = skill.get("title", skill_id)
+            content = skill.get("content") or {}
+            verdict = (content.get("verdict") or content.get("thesis")
+                       or content.get("price_trend") or "")
+            line    = f"  • {title}: {str(verdict)[:200]}"
+            favored  = (content.get("favored_tickers")
+                        or list((content.get("primary_beneficiaries") or {}).keys()))
+            cautious = content.get("cautious_tickers") or []
+            if favored:
+                line += f" | favored: {', '.join(favored[:4])}"
+            if cautious:
+                line += f" | cautious: {', '.join(cautious[:3])}"
+            lines.append(line)
+
     return "\n".join(lines) + "\n"
 
 
