@@ -26,6 +26,8 @@ class AgentbergClient:
     def _post(self, path: str, payload: dict, headers: dict | None = None) -> dict:
         with httpx.Client(timeout=10) as c:
             r = c.post(f"{self._base}{path}", json=payload, headers=headers)
+            if not r.is_success:
+                print(f"[agentberg] {r.status_code} POST {path}: {r.text[:500]}")
             r.raise_for_status()
             return r.json()
 
