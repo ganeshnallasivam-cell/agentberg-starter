@@ -29,7 +29,7 @@ import risk
 import structures
 from agentberg import AgentbergClient
 from alpaca import AlpacaClient
-from llm import rank_candidates
+from llm import _HIGH_BETA_TICKERS, rank_candidates
 
 # Clients — constructed once at import time, reused across calls
 _alpaca    = AlpacaClient(cfg.ALPACA_API_KEY, cfg.ALPACA_SECRET_KEY, cfg.ALPACA_BASE_URL)
@@ -396,6 +396,21 @@ def run_session():
                 }
                 enriched += 1
         print(f"    Enriched {enriched}/{len(candidates)} candidates with network ticker intel")
+
+    # ── Step 3a.5: Pre-LLM hard filter — high-beta bullish in range_bound ────────
+    # Drop dangerous candidates before the LLM sees them. High-beta names tend to
+    # stop out in range-bound conditions regardless of how the LLM ranks them.
+    # Mirrors the hard rules injected into the LLM prompt via _regime_rules_section().
+    if regime == "range_bound":
+        _before = len(candidates)
+        candidates = [
+            c for c in candidates
+            if not (c.get("direction") == "bullish"
+                    and c.get("ticker") in _HIGH_BETA_TICKERS)
+        ]
+        _dropped = _before - len(candidates)
+        if _dropped:
+            print(f"    [hard-filter] dropped {_dropped} high-beta bullish candidate(s) in range_bound regime")
 
     print(f"    {len(candidates)} candidate(s) before LLM filter")
 

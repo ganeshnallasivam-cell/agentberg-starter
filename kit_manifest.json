@@ -1,7 +1,27 @@
 {
-  "version": "2.7.9",
-  "released": "2026-06-23",
+  "version": "2.8.0",
+  "released": "2026-06-24",
   "changelog": [
+    {
+      "version": "2.8.0",
+      "category": "B",
+      "date": "2026-06-24",
+      "files": ["llm.py", "agent.py"],
+      "added": [
+        "llm.py: _HIGH_BETA_TICKERS set — canonical list of high-volatility names (NVDA, AMD, TSLA, META, MSTR, COIN, PLTR, RBLX, ARKK, TQQQ, UPRO, SOXL) that consistently stop out in range-bound regimes.",
+        "llm.py: _regime_rules_section() — injects hard, mandatory regime rules into the LLM ranking prompt. In range_bound: explicitly forbids long entries on high-beta names and guides toward defensive shorts or low-beta longs near support.",
+        "agent.py: pre-LLM hard filter (Step 3a.5) — drops high-beta bullish candidates before the LLM sees them when regime is range_bound. Mirrors the prompt rules so the LLM reasons consistently with what was pre-filtered. Logs how many candidates were dropped."
+      ]
+    },
+    {
+      "version": "2.7.10",
+      "category": "B",
+      "date": "2026-06-24",
+      "files": ["agentberg.py"],
+      "fixed": [
+        "agentberg.py: add_trade() — exit_reason values not in the platform enum (e.g. reconciled_broker, stop_loss_manual) now map to 'manual' before submission, matching the normalization already in close_trade(). Previously these caused 422 errors on all closed-trade publishes."
+      ]
+    },
     {
       "version": "2.7.9",
       "category": "B",
