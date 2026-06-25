@@ -788,11 +788,15 @@ def check_positions():
         unrealised_pnl_pct = float(pos.get("unrealized_plpc", 0))
         asset_class = pos.get("asset_class", "")
 
-        # ── Trailing stop (equity only) ────────────────────────────────────────
+        # ── Trailing stop (all instruments) ────────────────────────────────────
         # Tracks the highest price seen since entry. Once the position is up
-        # TRAILING_STOP_TRIGGER_PCT, the stop trails TRAILING_STOP_DISTANCE_PCT
-        # below that high — locking in gains on reversals without capping upside.
-        if cfg.TRAILING_STOP_ENABLED and asset_class == "us_equity":
+        # TRIGGER_PCT, the stop trails DISTANCE_PCT below that high — locking in
+        # gains on reversals without capping upside. Equities use tight distances
+        # (1%); options use wider ones (20%) to survive normal premium volatility.
+        if cfg.TRAILING_STOP_ENABLED:
+            is_equity = asset_class == "us_equity"
+            trigger_pct  = cfg.TRAILING_STOP_TRIGGER_PCT if is_equity else cfg.OPTION_TRAILING_STOP_TRIGGER_PCT
+            distance_pct = cfg.TRAILING_STOP_DISTANCE_PCT if is_equity else cfg.OPTION_TRAILING_STOP_DISTANCE_PCT
             current_price = float(pos.get("current_price", 0))
             trade = next((t for t in open_trades
                           if t.get("long_symbol") == symbol or t["symbol"] == symbol), None)
@@ -801,8 +805,8 @@ def check_positions():
                 if current_price > hwm:
                     hwm = current_price
                     memory.update_high_water_mark(trade["id"], hwm)
-                if unrealised_pnl_pct >= cfg.TRAILING_STOP_TRIGGER_PCT:
-                    trail_stop = hwm * (1 - cfg.TRAILING_STOP_DISTANCE_PCT)
+                if unrealised_pnl_pct >= trigger_pct:
+                    trail_stop = hwm * (1 - distance_pct)
                     if current_price <= trail_stop:
                         print(f"[monitor] TRAILING STOP {symbol}: "
                               f"${current_price:.2f} below trail ${trail_stop:.2f} "

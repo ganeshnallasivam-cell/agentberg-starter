@@ -1,7 +1,17 @@
 {
-  "version": "2.8.2",
+  "version": "2.8.3",
   "released": "2026-06-24",
   "changelog": [
+    {
+      "version": "2.8.3",
+      "category": "B",
+      "date": "2026-06-24",
+      "files": ["agent.py", "config.py"],
+      "added": [
+        "agent.py: trailing stop now applies to all instruments (equities + options/spreads), not equities only. Asset class selects the right trigger/distance config at runtime.",
+        "config.py: OPTION_TRAILING_STOP_TRIGGER_PCT (default 0.20) and OPTION_TRAILING_STOP_DISTANCE_PCT (default 0.20) — wider distances for options to survive premium volatility and theta decay without premature exits."
+      ]
+    },
     {
       "version": "2.8.2",
       "category": "B",
