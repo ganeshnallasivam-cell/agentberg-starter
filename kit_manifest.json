@@ -1,7 +1,50 @@
 {
-  "version": "2.8.5",
+  "version": "2.8.9",
   "released": "2026-06-25",
   "changelog": [
+    {
+      "version": "2.8.9",
+      "category": "A",
+      "date": "2026-06-25",
+      "files": ["agentberg.py"],
+      "added": [
+        "agentberg.py: report_issue(trap_name, concern, severity, diagnostics, run_count, kit_version) — fires a support trap to POST /support/case. Returns {case_id, status} so the agent can poll for operator recommendations. Silent failure (print + None return) consistent with all other client methods.",
+        "agentberg.py: get_recommendation(case_id) — polls GET /support/case/{case_id}/recommendation for an operator-posted fix. Returns None if recommendation not yet available.",
+        "Together these close the support loop: agent detects anomaly → report_issue → operator sees Slack alert → posts recommendation → agent picks it up on next poll."
+      ]
+    },
+    {
+      "version": "2.8.8",
+      "category": "A",
+      "date": "2026-06-25",
+      "files": ["agent.py"],
+      "added": [
+        "agent.py STEP 3: pre-market movers injection — up to 5 tickers from intelligence_snapshot.premarket_movers (server pre-computed via yfinance, refreshed every 30 min) added as candidates if not already in watchlist. Source tagged 'premarket'. Bars fetched from Alpaca to compute direction/beta.",
+        "agent.py STEP 3: social heat injection — up to 5 tickers from intelligence_snapshot.social_heat (StockTwits, refreshed every 30 min) with directional sentiment (bullish/bearish/leaning) added as candidates. Neutral-sentiment tickers skipped. Source tagged 'social_heat'.",
+        "agent.py STEP 3a: network_intel now includes premarket_chg_pct, premarket_direction, stocktwits_sentiment, stocktwits_bull_pct from /ticker-brief response — flows into LLM ranking context at STEP 3b for all candidates including injected ones.",
+        "Both injection streams go through full STEP 3a enrichment + 3a.5 hard filter + 3b LLM ranking + STEP 4 risk checks. Sector from server response ensures sector-level checks apply. Max 10 new candidates total (5 pre-market + 5 social)."
+      ]
+    },
+    {
+      "version": "2.8.7",
+      "category": "A",
+      "date": "2026-06-25",
+      "files": ["agent.py"],
+      "added": [
+        "agent.py STEP 4: sector-level finding auto-link on trade open. Each trade now attaches finding_ids from two sources: (1) ticker-level from_finding_id (existing, from finding_ticker_map), (2) network_blocked_map finding for the trade's sector — if the network flagged this sector as failing and agent trades it, the vote at close is empirical (win=upvote, loss=downvote). All three execution modes (equity, premium_buyer, spreads) updated. Network-sourced tickers (sector='Network') are excluded from sector-level linking. Result: far more auto-votes fire at trade close without any opinion votes — empirical signal only."
+      ]
+    },
+    {
+      "version": "2.8.6",
+      "category": "A",
+      "date": "2026-06-25",
+      "files": ["agent.py", "agentberg.py"],
+      "added": [
+        "agent.py STEP 0c: new lifecycle step between 0b (catalog sync) and 1 (network intelligence). Calls GET /intelligence?regime={regime} — pre-computed server snapshot with 15-min cache. Prints network trend (7d vs 30d WR), rising findings count, tier-2+ consensus count. Non-blocking: failure continues without 0c data.",
+        "agent.py STEP 1: intelligence_snapshot merged into network_signals dict alongside brief/entry_signals/rotation/narrative/catalog_skills/network_coverage — flows into LLM ranking context at STEP 3b automatically.",
+        "agentberg.py: get_intelligence_snapshot(regime) — GET /intelligence with agent_id + optional regime param. Returns dict with finding_velocity, regime_win_rates, top_agent_consensus, network_trend. Silent on failure."
+      ]
+    },
     {
       "version": "2.8.5",
       "category": "A",

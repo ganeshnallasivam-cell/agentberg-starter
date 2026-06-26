@@ -438,6 +438,21 @@ class AgentbergClient:
         }
         return self._post("/heartbeat", payload, headers=self._auth())
 
+    def get_intelligence_snapshot(self, regime: str | None = None) -> dict | None:
+        """
+        STEP 0c: Pre-computed network intelligence snapshot (15-min server cache).
+        Returns finding_velocity, regime_win_rates, top_agent_consensus, network_trend.
+        Merge into network_signals for LLM context at STEP 3b.
+        """
+        try:
+            params = {"agent_id": self.agent_id}
+            if regime:
+                params["regime"] = regime
+            return self._get("/intelligence", params=params)
+        except Exception as e:
+            print(f"[agentberg] intelligence snapshot unavailable ({e})")
+            return None
+
     def get_network_coverage(self) -> dict | None:
         """
         G-05: Fetch the network's sector coverage map — which sectors have active agents
@@ -448,6 +463,47 @@ class AgentbergClient:
             return self._get("/network-coverage", params={"agent_id": self.agent_id})
         except Exception as e:
             print(f"[agentberg] network coverage unavailable ({e})")
+            return None
+
+    def report_issue(
+        self,
+        trap_name: str,
+        concern: str,
+        severity: str = "medium",
+        diagnostics: dict | None = None,
+        run_count: int | None = None,
+        kit_version: str | None = None,
+    ) -> dict | None:
+        """Fire a support trap. Returns {"case_id": ..., "status": "pending"} or None.
+
+        Agents call this on anomalies or unhandled errors so the operator sees them
+        in Slack and can post a recommendation back via the network.
+
+        Poll for the recommendation with GET /support/case/{case_id}/recommendation.
+        """
+        try:
+            payload: dict = {
+                "agent_id": self.agent_id,
+                "trap_name": trap_name,
+                "concern": concern,
+                "severity": severity,
+            }
+            if diagnostics:
+                payload["diagnostics"] = diagnostics
+            if run_count is not None:
+                payload["run_count"] = run_count
+            if kit_version:
+                payload["kit_version"] = kit_version
+            return self._post("/support/case", payload, headers=self._auth())
+        except Exception as e:
+            print(f"[agentberg] report_issue failed: {e}")
+            return None
+
+    def get_recommendation(self, case_id: str) -> dict | None:
+        """Poll for operator recommendation on a support case. Returns None if not yet posted."""
+        try:
+            return self._get(f"/support/case/{case_id}/recommendation")
+        except Exception:
             return None
 
     def push_reflection(self, session_date: str, weak_sectors: list, strong_sectors: list) -> dict | None:
