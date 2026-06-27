@@ -319,6 +319,23 @@ def run_session():
     except Exception as e:
         print(f"    [0c] intelligence snapshot failed ({e}) — continuing")
 
+    # ── Step 0d: Attribution report — push 30-day summary to network ──────────
+    # Agent computes own breakdown locally (zero server compute), pushes summary.
+    # Server afternoon job cross-compares all agents → synthetic fleet findings.
+    _session_macro_window = risk_level == "high"
+    print("[0d] Pushing attribution report...")
+    try:
+        _attr_report = memory.compute_attribution(window_days=30)
+        if _attr_report and _attr_report.get("total_trades", 0) > 0:
+            _agentberg.push_attribution_report(_attr_report)
+            print(f"    Attribution: {_attr_report['total_trades']} trades | "
+                  f"WR {_attr_report['win_rate']:.0%} | "
+                  f"network-aligned P&L ${_attr_report['network_aligned_pnl']:+,.0f}")
+        else:
+            print("    No closed trades in window — skipping attribution push")
+    except Exception as e:
+        print(f"    [0d] attribution push failed ({e}) — continuing")
+
     # ── Step 1: Network intelligence ──────────────────────────────────────────
     print("[1] Querying Agentberg network...")
     network_blocked_map = _agentberg.get_blocked_sectors()          # {sector: finding_id}
@@ -663,7 +680,8 @@ def run_session():
     # Guard: tickers ordered this session (catches duplicate candidates across sectors)
     traded_this_session: set[str] = set()
 
-    for c in candidates:
+    _candidates_total = len(candidates)
+    for _rank_pos, c in enumerate(candidates, start=1):
         ticker    = c["ticker"]
         sector    = c["sector"]
         direction = c["direction"]
@@ -723,10 +741,17 @@ def run_session():
                     finding_ids=trade_finding_ids,
                     sector=sector, entry_price=live_price,
                     execution_env="paper" if cfg.ALPACA_PAPER else "live",
+                    entry_regime=regime, entry_beta=c.get("beta"),
+                    network_aligned=bool(trade_finding_ids),
+                    network_signal=direction, macro_window=_session_macro_window,
                 )
                 trade_id   = memory.record_trade_open(ticker, sector, live_price, qty,
                                 signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct,
-                                network_trade_id=net_open.get("trade_id") if net_open else None)
+                                network_trade_id=net_open.get("trade_id") if net_open else None,
+                                entry_regime=regime, entry_beta=c.get("beta"),
+                                network_aligned=bool(trade_finding_ids),
+                                network_signal=direction, macro_window=_session_macro_window,
+                                candidates_ranked=_candidates_total, rank_position=_rank_pos)
                 print(f"    ORDER {ticker}: {side} ×{qty} @ ~${live_price:.2f}  stop=${stop_price or 'none'}  tp=${take_profit_price or 'none'}")
                 executed.append({**c, "qty": qty, "order_id": order["id"], "memory_id": trade_id})
                 traded_this_session.add(ticker)
@@ -773,11 +798,20 @@ def run_session():
                     finding_ids=trade_finding_ids,
                     sector=sector, entry_price=limit_price,
                     execution_env="paper" if cfg.ALPACA_PAPER else "live",
+                    entry_regime=regime, entry_beta=c.get("beta"),
+                    entry_iv=iv_rank, entry_dte=dte,
+                    network_aligned=bool(trade_finding_ids),
+                    network_signal=direction, macro_window=_session_macro_window,
                 )
                 trade_id = memory.record_trade_open(ticker, sector, limit_price, 1, trade_type=f"long_{option_type}",
                                 signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct,
                                 long_symbol=contract["symbol"],
-                                network_trade_id=net_open.get("trade_id") if net_open else None)
+                                network_trade_id=net_open.get("trade_id") if net_open else None,
+                                entry_regime=regime, entry_beta=c.get("beta"),
+                                entry_iv=iv_rank, entry_dte=dte,
+                                network_aligned=bool(trade_finding_ids),
+                                network_signal=direction, macro_window=_session_macro_window,
+                                candidates_ranked=_candidates_total, rank_position=_rank_pos)
                 print(f"    ORDER {ticker} {option_type.upper()} {contract['expiration_date']} ${contract['strike_price']} δ={delta:.2f} @ ${limit_price:.2f}")
                 executed.append({**c, "symbol": contract["symbol"], "premium": limit_price, "memory_id": trade_id})
                 traded_this_session.add(ticker)
@@ -828,12 +862,19 @@ def run_session():
                     finding_ids=trade_finding_ids,
                     sector=sector, entry_price=net_debit,
                     execution_env="paper" if cfg.ALPACA_PAPER else "live",
+                    entry_regime=regime, entry_beta=c.get("beta"),
+                    entry_dte=dte, network_aligned=bool(trade_finding_ids),
+                    network_signal=direction, macro_window=_session_macro_window,
                 )
                 trade_id = memory.record_trade_open(ticker, sector, net_debit, 1, trade_type=f"{option_type}_spread",
                                 signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct,
                                 long_symbol=buy_leg["symbol"], short_symbol=sell_leg["symbol"],
                                 multiplier=100, order_id=order.get("id"),
-                                network_trade_id=net_open.get("trade_id") if net_open else None)
+                                network_trade_id=net_open.get("trade_id") if net_open else None,
+                                entry_regime=regime, entry_beta=c.get("beta"),
+                                entry_dte=dte, network_aligned=bool(trade_finding_ids),
+                                network_signal=direction, macro_window=_session_macro_window,
+                                candidates_ranked=_candidates_total, rank_position=_rank_pos)
                 print(f"    SPREAD {ticker} {option_type.upper()} ${float(buy_leg['strike_price']):.0f}/${float(sell_leg['strike_price']):.0f} debit=${net_debit:.2f}")
                 executed.append({**c, "memory_id": trade_id, "net_debit": net_debit})
                 traded_this_session.add(ticker)

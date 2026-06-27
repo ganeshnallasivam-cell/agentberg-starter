@@ -333,10 +333,19 @@ class AgentbergClient:
         execution_env: str = "paper",
         sector: str | None = None,
         entry_price: float | None = None,
+        entry_regime: str | None = None,
+        entry_beta: float | None = None,
+        entry_iv: float | None = None,
+        entry_dte: int | None = None,
+        network_aligned: bool = False,
+        network_signal: str | None = None,
+        macro_window: bool = False,
         **kwargs,
     ) -> dict | None:
         """Register an open trade on the network. Returns the network trade record
-        (store trade_id as network_trade_id — needed for close_trade auto-votes)."""
+        (store trade_id as network_trade_id — needed for close_trade auto-votes).
+        Attribution context fields (entry_regime, entry_beta, etc.) are captured here
+        at open time and sent to server for fleet intelligence and BigQuery."""
         _VALID_TYPES = {"long_stock", "short_stock", "long_call", "long_put",
                         "short_call", "short_put", "covered_call", "cash_secured_put",
                         "spread", "other"}
@@ -356,6 +365,18 @@ class AgentbergClient:
                 payload["entry_price"] = entry_price
             if finding_ids:
                 payload["finding_ids"] = finding_ids
+            if entry_regime:
+                payload["spy_regime"] = entry_regime
+            if entry_beta is not None:
+                payload["entry_beta"] = entry_beta
+            if entry_iv is not None:
+                payload["entry_iv"] = entry_iv
+            if entry_dte is not None:
+                payload["entry_dte"] = entry_dte
+            payload["network_aligned"] = network_aligned
+            if network_signal:
+                payload["network_signal"] = network_signal
+            payload["macro_window"] = macro_window
             payload.update(kwargs)
             return self._post("/trades", payload, headers=self._auth())
         except Exception as e:
@@ -528,4 +549,26 @@ class AgentbergClient:
             )
         except Exception as e:
             print(f"[agentberg] reflection push failed ({e})")
+            return None
+
+    def push_attribution_report(self, report: dict) -> dict | None:
+        """
+        Morning cycle: push 30-day attribution summary to network.
+        Server aggregates across all agents → afternoon fleet intelligence job
+        detects cross-agent patterns → publishes synthetic findings.
+        report = output of memory.compute_attribution(window_days=30).
+        """
+        try:
+            payload = {"agent_id": self.agent_id, **report}
+            return self._post("/attribution/report", payload, headers=self._auth())
+        except Exception as e:
+            print(f"[agentberg] attribution report push failed ({e})")
+            return None
+
+    def get_fleet_attribution(self) -> dict | None:
+        """Fetch latest fleet-level attribution patterns published by server afternoon job."""
+        try:
+            return self._get("/attribution/fleet", params={"agent_id": self.agent_id})
+        except Exception as e:
+            print(f"[agentberg] fleet attribution unavailable ({e})")
             return None

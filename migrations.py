@@ -27,6 +27,16 @@ _MIGRATIONS = [
     ("published_at",    "TEXT"),
     # v2.5.1 — network trade id for auto-vote on close
     ("network_trade_id", "TEXT"),
+    # v2.8.18 — attribution context captured at trade open
+    ("entry_regime",      "TEXT"),
+    ("entry_beta",        "REAL"),
+    ("entry_iv",          "REAL"),
+    ("entry_dte",         "INTEGER"),
+    ("network_aligned",   "INTEGER DEFAULT 0"),
+    ("network_signal",    "TEXT"),
+    ("macro_window",      "INTEGER DEFAULT 0"),
+    ("candidates_ranked", "INTEGER"),
+    ("rank_position",     "INTEGER"),
 ]
 
 

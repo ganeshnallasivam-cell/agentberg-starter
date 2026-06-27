@@ -127,6 +127,15 @@ def record_trade_open(
     multiplier: int = 1,
     order_id: str | None = None,
     network_trade_id: str | None = None,
+    entry_regime: str | None = None,
+    entry_beta: float | None = None,
+    entry_iv: float | None = None,
+    entry_dte: int | None = None,
+    network_aligned: bool = False,
+    network_signal: str | None = None,
+    macro_window: bool = False,
+    candidates_ranked: int | None = None,
+    rank_position: int | None = None,
 ) -> int:
     """
     Open a trade. Pass signal_data to record the entry signals, and the trade
@@ -135,6 +144,8 @@ def record_trade_open(
     recorded NOW and held to at close, so the rationale can't be hallucinated later.
     Pass network_trade_id when the trade was registered on Agentberg via open_trade()
     so close_trade() can be called on close for auto-voting on linked findings.
+    Attribution context (entry_regime, entry_beta, etc.) is captured here at open —
+    market context changes after close so it can't be reconstructed retroactively.
     """
     today = datetime.date.today().isoformat()
     now = datetime.datetime.now().isoformat(timespec="seconds")
@@ -143,12 +154,19 @@ def record_trade_open(
             """INSERT INTO trades
                (symbol, sector, trade_type, entry_price, qty, status, session_date,
                 opened_at, signal_data, entry_thesis, expected_pct, stop_pct,
-                long_symbol, short_symbol, multiplier, order_id, network_trade_id)
-               VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                long_symbol, short_symbol, multiplier, order_id, network_trade_id,
+                entry_regime, entry_beta, entry_iv, entry_dte,
+                network_aligned, network_signal, macro_window,
+                candidates_ranked, rank_position)
+               VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, sector, trade_type, entry_price, qty, today, now,
              json.dumps(signal_data) if signal_data else None,
              thesis, expected_pct, stop_pct,
-             long_symbol or symbol, short_symbol, multiplier, order_id, network_trade_id),
+             long_symbol or symbol, short_symbol, multiplier, order_id, network_trade_id,
+             entry_regime, entry_beta, entry_iv, entry_dte,
+             1 if network_aligned else 0, network_signal, 1 if macro_window else 0,
+             candidates_ranked, rank_position),
         )
         return cur.lastrowid
 
@@ -462,6 +480,79 @@ def get_win_rate(days: int = 30, sector: str | None = None) -> dict:
         "net_pnl": round(row["net_pnl"] or 0, 2),
         "days": days,
         "sector": sector,
+    }
+
+
+def compute_attribution(window_days: int = 30) -> dict:
+    """
+    Compute 30-day attribution breakdown from local SQLite for push to network.
+    Groups closed trades by sector, regime, instrument type, exit reason, and
+    network alignment. Used by agent Step 0d to push summary to /attribution/report.
+    """
+    cutoff = (datetime.date.today() - datetime.timedelta(days=window_days)).isoformat()
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT sector, trade_type, exit_reason, entry_regime,
+                      network_aligned, macro_window, pnl, pnl_pct
+               FROM trades
+               WHERE status='closed' AND closed_at >= ?""",
+            (cutoff,),
+        ).fetchall()
+
+    if not rows:
+        return {}
+
+    def _agg(group):
+        trades = len(group)
+        wins = sum(1 for r in group if (r["pnl"] or 0) > 0)
+        pnl = sum(r["pnl"] or 0 for r in group)
+        return {"trades": trades, "wins": wins,
+                "win_rate": round(wins / trades, 3) if trades else 0,
+                "pnl": round(pnl, 2)}
+
+    by_sector: dict = {}
+    by_regime: dict = {}
+    by_instrument: dict = {}
+    by_exit_reason: dict = {}
+    aligned: list = []
+    ignored: list = []
+    macro_losses = 0
+    macro_total = 0
+
+    for r in rows:
+        sec = r["sector"] or "Unknown"
+        reg = r["entry_regime"] or "unknown"
+        instr = "equity" if r["trade_type"] in ("long_stock", "short_stock") else r["trade_type"] or "other"
+        ex = r["exit_reason"] or "unknown"
+        by_sector.setdefault(sec, []).append(r)
+        by_regime.setdefault(reg, []).append(r)
+        by_instrument.setdefault(instr, []).append(r)
+        by_exit_reason.setdefault(ex, []).append(r)
+        if r["network_aligned"]:
+            aligned.append(r)
+        else:
+            ignored.append(r)
+        if r["macro_window"]:
+            macro_total += 1
+            if (r["pnl"] or 0) < 0:
+                macro_losses += 1
+
+    total = len(rows)
+    wins = sum(1 for r in rows if (r["pnl"] or 0) > 0)
+    net_pnl = sum(r["pnl"] or 0 for r in rows)
+
+    return {
+        "window_days": window_days,
+        "total_trades": total,
+        "win_rate": round(wins / total, 3) if total else 0,
+        "net_pnl": round(net_pnl, 2),
+        "by_sector":      {k: _agg(v) for k, v in by_sector.items()},
+        "by_regime":      {k: _agg(v) for k, v in by_regime.items()},
+        "by_instrument":  {k: _agg(v) for k, v in by_instrument.items()},
+        "by_exit_reason": {k: _agg(v) for k, v in by_exit_reason.items()},
+        "network_aligned_pnl": round(sum(r["pnl"] or 0 for r in aligned), 2),
+        "network_ignored_pnl": round(sum(r["pnl"] or 0 for r in ignored), 2),
+        "macro_window_loss_rate": round(macro_losses / macro_total, 3) if macro_total else 0,
     }
 
 
