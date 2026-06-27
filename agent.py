@@ -31,6 +31,56 @@ from agentberg import AgentbergClient
 from alpaca import AlpacaClient
 from llm import rank_candidates
 
+def _compute_intraday_signals(ticker: str) -> dict | None:
+    """Fetch today's 15-min bars and compute intraday RSI(14), VWAP, and distance
+    to 20-day high. Returns None on insufficient data (e.g. pre-market, weekend).
+    All values are informational — passed into LLM context, never hard-gated."""
+    try:
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        bars_15m = _alpaca.get_bars(ticker, timeframe="15Min", limit=40)
+        # Keep only today's bars
+        today_bars = [b for b in bars_15m if b["t"][:10] == today]
+        if len(today_bars) < 6:
+            return None
+
+        # Intraday RSI(14) — use close prices from 15-min bars
+        closes = [float(b["c"]) for b in today_bars]
+        if len(closes) < 2:
+            return None
+        deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        gains  = [d for d in deltas if d > 0]
+        losses = [-d for d in deltas if d < 0]
+        avg_gain = sum(gains) / len(deltas) if deltas else 0
+        avg_loss = sum(losses) / len(deltas) if deltas else 0
+        intraday_rsi = 100 - (100 / (1 + avg_gain / avg_loss)) if avg_loss else 100.0
+
+        # VWAP — (sum of typical_price × volume) / sum(volume)
+        tp_vol = sum(((float(b["h"]) + float(b["l"]) + float(b["c"])) / 3) * float(b["v"])
+                     for b in today_bars)
+        total_vol = sum(float(b["v"]) for b in today_bars)
+        vwap = tp_vol / total_vol if total_vol else closes[-1]
+
+        # Distance to 20-day high (using daily bars already cached at scan time)
+        daily_bars = _alpaca.get_bars(ticker, timeframe="1Day", limit=22)
+        if daily_bars:
+            high_20d = max(float(b["h"]) for b in daily_bars[-20:])
+            pct_from_high = (closes[-1] - high_20d) / high_20d  # negative = below high
+        else:
+            high_20d = None
+            pct_from_high = None
+
+        return {
+            "intraday_rsi":    round(intraday_rsi, 1),
+            "intraday_vwap":   round(vwap, 2),
+            "price_vs_vwap":   round((closes[-1] - vwap) / vwap * 100, 2),  # % above/below VWAP
+            "pct_from_20d_high": round(pct_from_high * 100, 2) if pct_from_high is not None else None,
+            "bars_today":      len(today_bars),
+        }
+    except Exception as exc:
+        return None
+
+
 def _compute_beta(stock_bars: list, spy_bars: list) -> float:
     """Compute realized beta vs SPY from daily close bars. Returns 0.0 on insufficient data."""
     stock_closes = {b["t"][:10]: float(b["c"]) for b in stock_bars}
@@ -528,6 +578,20 @@ def run_session():
                 }
                 enriched += 1
         print(f"    Enriched {enriched}/{len(candidates)} candidates with network ticker intel")
+
+    # ── Step 3a.1: Intraday signal enrichment (15-min bars) ───────────────────────
+    # Fetch today's 15-min bars for each candidate and attach intraday RSI, VWAP,
+    # and distance-to-20d-high. Informational only — flows into LLM ranking context.
+    # Silent on failure (pre-market, weekend, API error) — candidate is not dropped.
+    if candidates:
+        intraday_enriched = 0
+        for c in candidates:
+            sig = _compute_intraday_signals(c["ticker"])
+            if sig:
+                c["intraday"] = sig
+                intraday_enriched += 1
+        if intraday_enriched:
+            print(f"    Intraday signals (15-min RSI/VWAP/high) added for {intraday_enriched}/{len(candidates)} candidates")
 
     # ── Step 3a.5: Pre-LLM hard filter — high-beta bullish in range_bound ────────
     # Drop candidates whose realized beta vs SPY exceeds the threshold before the LLM

@@ -187,6 +187,10 @@ Review each candidate. Honor the operator's character above. Keep at most {cfg.M
 Skip if the move is extremely weak (< 0.1%). Weigh your own sector track record heavily —
 if you've consistently lost in a sector, that matters more than a single network advisory.
 Prefer stronger moves in sectors where your own evidence shows edge.
+If a candidate has an "intraday" field: use intraday_rsi (>65 = momentum, <35 = oversold),
+price_vs_vwap (positive = price above VWAP, bullish bias), and pct_from_20d_high
+(near 0 = testing resistance, far negative = room to run). These are intraday confirmation
+signals — treat them as supporting (not overriding) your daily signal assessment.
 
 Return a JSON array of candidates to TRADE, priority order.
 Each object: ticker, sector, direction, price, day_change, reason (one sentence — include
