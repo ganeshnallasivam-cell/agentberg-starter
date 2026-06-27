@@ -322,7 +322,7 @@ def run_session():
     # ── Step 0d: Attribution report — push 30-day summary to network ──────────
     # Agent computes own breakdown locally (zero server compute), pushes summary.
     # Server afternoon job cross-compares all agents → synthetic fleet findings.
-    _session_macro_window = risk_level == "high"
+    _session_macro_window = risk_level == "high"  # fallback; overridden by Step 0e
     print("[0d] Pushing attribution report...")
     try:
         _attr_report = memory.compute_attribution(window_days=30)
@@ -335,6 +335,25 @@ def run_session():
             print("    No closed trades in window — skipping attribution push")
     except Exception as e:
         print(f"    [0d] attribution push failed ({e}) — continuing")
+
+    # ── Step 0e: Macro calendar — session sizing posture from real event dates ─
+    # FOMC, CPI, NFP, PCE within 7 days → macro_window=True → reduce sizing.
+    # Replaces the risk_level=="high" heuristic with actual BLS/Fed calendar data.
+    print("[0e] Checking macro calendar...")
+    try:
+        _macro = _agentberg.get_macro_calendar()
+        if _macro:
+            _session_macro_window = _macro.get("macro_window", False)
+            _days_to_event = _macro.get("days_to_next_high_impact")
+            _next_event    = _macro.get("next_high_impact_event", "")
+            if _session_macro_window:
+                print(f"    MACRO WINDOW ACTIVE — {_next_event} in {_days_to_event}d. Sizing reduced.")
+            else:
+                print("    No high-impact events in 7-day window. Normal sizing.")
+        else:
+            print("    [0e] macro calendar unavailable — using risk_level fallback")
+    except Exception as e:
+        print(f"    [0e] macro calendar failed ({e}) — using risk_level fallback")
 
     # ── Step 1: Network intelligence ──────────────────────────────────────────
     print("[1] Querying Agentberg network...")

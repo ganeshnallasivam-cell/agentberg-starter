@@ -5,6 +5,13 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.8.19 — 2026-06-27
+
+*Files:* agentberg.py, agent.py
+
+- Step 0e: Macro calendar check — agent pulls /skills/macro at session start and sets _session_macro_window from real FOMC/CPI/NFP/PCE event dates (7-day window). Replaces the risk_level=='high' heuristic. If any high-impact event is within 7 days, macro_window=True and sizing is reduced. Falls back to risk_level heuristic if endpoint unavailable.
+- New agentberg.get_macro_calendar(): GET /skills/macro — returns macro_window bool, days_to_next_high_impact, next_high_impact_event, events list, recommended_sizing.
+
 ## v2.8.18 — 2026-06-27
 
 *Files:* migrations.py, memory.py, agentberg.py, agent.py

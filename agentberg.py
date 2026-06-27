@@ -572,3 +572,13 @@ class AgentbergClient:
         except Exception as e:
             print(f"[agentberg] fleet attribution unavailable ({e})")
             return None
+
+    def get_macro_calendar(self) -> dict | None:
+        """7-day forward macro event window: FOMC, CPI, NFP, PCE, PPI.
+        Returns macro_window=True when any high-impact event falls within 7 days.
+        Use at Step 0e to set session sizing posture from real event dates."""
+        try:
+            return self._get("/skills/macro", params={"agent_id": self.agent_id})
+        except Exception as e:
+            print(f"[agentberg] macro calendar unavailable ({e})")
+            return None
