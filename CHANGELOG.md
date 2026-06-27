@@ -5,6 +5,23 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.8.18 — 2026-06-27
+
+*Files:* migrations.py, memory.py, agentberg.py, agent.py
+
+- Attribution context captured at trade open: entry_regime, entry_beta, entry_iv (options), entry_dte (options), network_aligned, network_signal, macro_window, candidates_ranked, rank_position. Stored in local SQLite via migrations + memory.record_trade_open().
+- New memory.compute_attribution(window_days=30): local SQLite breakdown by sector, regime, instrument, exit_reason, and network alignment. Zero server compute — agent owns its own data.
+- New agentberg.push_attribution_report(): POSTs 30-day summary to /attribution/report each morning (Step 0d). Server afternoon job cross-compares all agents → synthetic fleet findings.
+- New agentberg.get_fleet_attribution(): pulls latest fleet-level attribution patterns from /attribution/fleet.
+- Step 0d added to agent.py: compute + push attribution before network intelligence query. Reports WR and network-aligned P&L in session log.
+- All 3 trade open call sites (equity, premium_buyer, spreads) now pass attribution context to both open_trade() and record_trade_open().
+
+## v2.8.17 — 2026-06-28
+
+*Files:* agent.py, llm.py
+
+- Intraday signal enrichment (Step 3a.1): each candidate is enriched with intraday RSI(14), VWAP, price-vs-VWAP (%), and distance to 20-day high — computed from today's 15-min Alpaca bars. Attached as candidate.intraday dict. Flows automatically into LLM ranking context. Silent on failure (pre-market, weekend, API error). No candidates are dropped — informational only. Credit: ppower proposal.
+
 ## v2.8.16 — 2026-06-27
 
 *Files:* agentberg_cli/cli.py
