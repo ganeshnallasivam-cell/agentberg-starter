@@ -38,22 +38,19 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          python - "$TAG" <<'EOF'
-import sys, re
-tag = sys.argv[1]
-m = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', tag)
-if not m:
-    print(f"::error::version {tag} does not match x.y.z format")
-    sys.exit(1)
-x, y, z = int(m.group(1)), int(m.group(2)), int(m.group(3))
-if y > 10:
-    print(f"::error::version {tag}: y={y} exceeds max 10 — bump x and reset y to 0")
-    sys.exit(1)
-if z > 20:
-    print(f"::error::version {tag}: z={z} exceeds max 20 — bump y and reset z to 0")
-    sys.exit(1)
-print(f"Version {tag} OK (x={x}, y={y}, z={z})")
-EOF
+          X=$(echo "$TAG" | cut -d. -f1)
+          Y=$(echo "$TAG" | cut -d. -f2)
+          Z=$(echo "$TAG" | cut -d. -f3)
+          if ! echo "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version $TAG does not match x.y.z format"; exit 1
+          fi
+          if [ "$Y" -gt 10 ]; then
+            echo "::error::version $TAG: y=$Y exceeds max 10 — bump x and reset y to 0"; exit 1
+          fi
+          if [ "$Z" -gt 20 ]; then
+            echo "::error::version $TAG: z=$Z exceeds max 20 — bump y and reset z to 0"; exit 1
+          fi
+          echo "Version $TAG OK (x=$X, y=$Y, z=$Z)"
 
       - name: Guard — release notes must exist for this version
         if: startsWith(github.ref, 'refs/tags/')
