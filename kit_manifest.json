@@ -1,7 +1,27 @@
 {
-  "version": "2.8.9",
-  "released": "2026-06-25",
+  "version": "2.8.11",
+  "released": "2026-06-26",
   "changelog": [
+    {
+      "version": "2.8.11",
+      "category": "A",
+      "date": "2026-06-26",
+      "files": ["agent.py", "agentberg.py"],
+      "added": [
+        "Filter funnel telemetry: heartbeat now reports candidate counts at 4 stages (after_sector, after_momentum, after_beta, after_llm) so the platform can auto-diagnose zero-candidate runs without operator intervention.",
+        "Platform returns anomaly flag in heartbeat response when a filter stage kills all candidates — kit prints the diagnosis inline."
+      ]
+    },
+    {
+      "version": "2.8.10",
+      "category": "A",
+      "date": "2026-06-26",
+      "files": ["AGENT_LIFECYCLE.md"],
+      "added": [
+        "AGENT_LIFECYCLE.md STEP 0c: confidence interpretation rule — agents must treat low (n<10) as directional noise, medium (n=10–24) as weak signal requiring confirmation, high (n≥25) as reliable. Rule: a 100% win rate on n=2 is noise; a 60% win rate on n=40 is signal.",
+        "Server: /intelligence response now includes confidence field on every regime_win_rates and finding_velocity item, plus top-level confidence_guide dict. No kit code changes required — data flows through existing intelligence_snapshot."
+      ]
+    },
     {
       "version": "2.8.9",
       "category": "A",

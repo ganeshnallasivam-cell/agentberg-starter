@@ -245,6 +245,30 @@ def run_session():
     except Exception as e:
         print(f"    [catalog] failed ({e}) — continuing without catalog skills")
 
+    # ── Step 0c: Intelligence snapshot ────────────────────────────────────────
+    # Pre-computed signal from the server (15-min cache). Four enrichments:
+    # finding velocity (momentum), regime win rates, tier-2+ agent consensus,
+    # and network trend (7d vs 30d). All advisory — flows into LLM context.
+    print("[0c] Fetching intelligence snapshot...")
+    intelligence_snapshot: dict = {}
+    try:
+        snap = _agentberg.get_intelligence_snapshot(regime=regime)
+        if snap:
+            intelligence_snapshot = snap
+            trend = snap.get("network_trend", {})
+            velocity = snap.get("finding_velocity", [])
+            consensus = snap.get("top_agent_consensus", [])
+            wr_7d  = trend.get("win_rate_7d")
+            wr_30d = trend.get("win_rate_30d")
+            direction = ""
+            if wr_7d is not None and wr_30d is not None:
+                direction = " ↑ improving" if wr_7d > wr_30d else " ↓ declining"
+            wr_str = f"{wr_7d:.0%} (7d) vs {wr_30d:.0%} (30d){direction}" if wr_7d is not None else "n/a"
+            rising = [v for v in velocity if v.get("momentum") == "rising"]
+            print(f"    Network trend: WR {wr_str} | {len(rising)} finding(s) gaining votes | {len(consensus)} tier-2+ consensus signal(s)")
+    except Exception as e:
+        print(f"    [0c] intelligence snapshot failed ({e}) — continuing")
+
     # ── Step 1: Network intelligence ──────────────────────────────────────────
     print("[1] Querying Agentberg network...")
     network_blocked_map = _agentberg.get_blocked_sectors()          # {sector: finding_id}
@@ -310,13 +334,14 @@ def run_session():
             print(f"    Network coverage: {len(covered)} sector(s) well-covered, {len(blind)} sparse/blind")
 
     network_signals = {
-        "brief":          brief,
-        "entry_signals":  entry_signals,
-        "alerts":         alerts,
-        "rotation":       rotation,
-        "narrative":      narrative.get("summary") if isinstance(narrative, dict) else narrative,
-        "catalog_skills": catalog_skills,
-        "network_coverage": coverage,
+        "brief":                 brief,
+        "entry_signals":         entry_signals,
+        "alerts":                alerts,
+        "rotation":              rotation,
+        "narrative":             narrative.get("summary") if isinstance(narrative, dict) else narrative,
+        "catalog_skills":        catalog_skills,
+        "network_coverage":      coverage,
+        "intelligence_snapshot": intelligence_snapshot,
     }
 
     # ── Step 2: Portfolio state ────────────────────────────────────────────────
@@ -331,6 +356,7 @@ def run_session():
     # ── Step 3: Scan watchlist ─────────────────────────────────────────────────
     print(f"[3] Scanning {sum(len(v) for v in cfg.WATCHLIST.values())} tickers ({mode} mode)...")
     candidates = []
+    _funnel_sector = sum(len(v) for s, v in cfg.WATCHLIST.items() if s not in blocked_sectors)
 
     spy_bars = _alpaca.get_bars("SPY", timeframe="1Day", limit=40)
 
@@ -409,7 +435,73 @@ def run_session():
         candidate_tickers.add(fk_ticker)
         added_from_network += 1
 
+    # ── Step 3 (cont): Pre-market movers + social heat injection ─────────────
+    # Tickers from intelligence_snapshot (STEP 0c) that aren't already candidates.
+    # Pre-market movers: significant gap before open → real signal.
+    # Social heat: high StockTwits volume with bullish/bearish tilt → crowd signal.
+    # Both go through STEP 3a enrichment + 3a.5 hard filter + 3b LLM ranking.
+    # Sector from server response (pre-tagged) — ensures all checks apply.
+    _injected_market = 0
+    _MAX_PM   = 5   # cap: pre-market movers
+    _MAX_SOC  = 5   # cap: social heat
+
+    def _try_inject(ticker, sector_hint, source_tag):
+        nonlocal _injected_market
+        if ticker in candidate_tickers:
+            return
+        try:
+            bars = _alpaca.get_bars(ticker, timeframe="1Day", limit=40)
+            if len(bars) < 2:
+                return
+            latest_close = float(bars[-1]["c"])
+            prev_close   = float(bars[-2]["c"])
+            day_change   = (latest_close - prev_close) / prev_close
+            direction    = "bullish" if day_change > 0.003 else ("bearish" if day_change < -0.003 else None)
+            if not direction:
+                return
+            candidates.append({
+                "ticker":      ticker,
+                "sector":      sector_hint or "Unknown",
+                "direction":   direction,
+                "price":       latest_close,
+                "day_change":  day_change,
+                "beta":        _compute_beta(bars, spy_bars),
+                "source":      source_tag,
+            })
+            candidate_tickers.add(ticker)
+            print(f"    CANDIDATE {ticker} [{source_tag}]: {direction} {day_change:+.2%} @ ${latest_close:.2f}")
+            _injected_market += 1
+        except Exception:
+            pass
+
+    pm_added = 0
+    for mover in (intelligence_snapshot.get("premarket_movers") or []):
+        if pm_added >= _MAX_PM:
+            break
+        t = mover.get("ticker", "")
+        if not t or t in candidate_tickers:
+            continue
+        _try_inject(t, mover.get("sector"), "premarket")
+        pm_added += 1
+
+    soc_added = 0
+    for item in (intelligence_snapshot.get("social_heat") or []):
+        if soc_added >= _MAX_SOC:
+            break
+        t = item.get("ticker", "")
+        if not t or t in candidate_tickers:
+            continue
+        sent = item.get("stocktwits_sentiment", "")
+        if sent not in ("bullish", "bearish", "leaning_bullish", "leaning_bearish"):
+            continue  # skip neutral — no directional signal
+        _try_inject(t, item.get("sector"), "social_heat")
+        soc_added += 1
+
+    if _injected_market:
+        print(f"    Injected {_injected_market} candidate(s) from pre-market/social heat signals")
+
     print(f"    {len(candidates)} candidate(s) before enrichment")
+    _funnel_momentum = len(candidates)
 
     # ── Step 3a: Enrich candidates with agentberg ticker intelligence ──────────
     # Each candidate gets the network's collective verdict: trade stats from all
@@ -422,11 +514,17 @@ def run_session():
             brief = _agentberg.get_ticker_brief(c["ticker"])
             if brief:
                 c["network_intel"] = {
-                    "verdict":       brief["ticker_stats"]["verdict"],
-                    "network_wr":    brief["ticker_stats"]["win_rate"],
-                    "network_pnl":   brief["ticker_stats"]["net_pnl"],
-                    "trade_count":   brief["ticker_stats"]["trade_count"],
-                    "findings_count": len(brief.get("findings", [])),
+                    "verdict":              brief["ticker_stats"]["verdict"],
+                    "network_wr":           brief["ticker_stats"]["win_rate"],
+                    "network_pnl":          brief["ticker_stats"]["net_pnl"],
+                    "trade_count":          brief["ticker_stats"]["trade_count"],
+                    "findings_count":       len(brief.get("findings", [])),
+                    # Pre-market data (yfinance, pre-computed server-side)
+                    "premarket_chg_pct":    brief.get("premarket_chg_pct"),
+                    "premarket_direction":  brief.get("premarket_direction"),
+                    # StockTwits community sentiment (pre-computed server-side)
+                    "stocktwits_sentiment": brief.get("stocktwits_sentiment"),
+                    "stocktwits_bull_pct":  brief.get("stocktwits_bull_pct"),
                 }
                 enriched += 1
         print(f"    Enriched {enriched}/{len(candidates)} candidates with network ticker intel")
@@ -448,6 +546,7 @@ def run_session():
                   f"(beta > {cfg.HIGH_BETA_THRESHOLD}) in range_bound regime")
 
     print(f"    {len(candidates)} candidate(s) before LLM filter")
+    _funnel_beta = len(candidates)
 
     # ── Step 3b: LLM ranking with self-reflection ─────────────────────────────
     # The agent reviews its own track record before ranking — this is the reflection
@@ -460,6 +559,7 @@ def run_session():
     }
     candidates = rank_candidates(candidates, regime, risk_level, health_label,
                                  network_blocked, network_signals, performance_context)
+    _funnel_llm = len(candidates)
     candidates = candidates[:cfg.MAX_NEW_PER_CYCLE]
 
     # ── Step 3c: Send heartbeat (telemetry) ────────────────────────────────────
@@ -474,11 +574,19 @@ def run_session():
 
     universe_size = sum(len(v) for v in cfg.WATCHLIST.values())
     try:
-        _agentberg.send_heartbeat(
+        hb = _agentberg.send_heartbeat(
             kit_version=kit_version,
             universe_size=universe_size,
-            candidates_count_after_filters=len(candidates),
+            candidates_count_after_filters=_funnel_llm,
+            filter_funnel={
+                "after_sector":   _funnel_sector,
+                "after_momentum": _funnel_momentum,
+                "after_beta":     _funnel_beta,
+                "after_llm":      _funnel_llm,
+            },
         )
+        if hb and hb.get("anomaly"):
+            print(f"    [heartbeat] ⚠ {hb['anomaly_label']}: {hb['anomaly_detail']}")
     except Exception as e:
         print(f"    [heartbeat] failed ({e})")
 
@@ -499,6 +607,19 @@ def run_session():
         if ticker in held_tickers or ticker in traded_this_session:
             print(f"    SKIP {ticker}: already have open position or already ordered this session")
             continue
+
+        # Auto-link findings so auto-votes fire at trade close (pnl>0→upvote, pnl<0→downvote).
+        # Ticker-level: from_finding_id set at scan time (STEP 3).
+        # Sector-level: network_blocked_map finding for this sector — vote reflects whether
+        # the sector-failure signal was correct. Both are empirical; no opinion votes.
+        _trade_fids: list[str] = []
+        if c.get("from_finding_id"):
+            _trade_fids.append(str(c["from_finding_id"]))
+        if sector != "Network":
+            _sector_fid = network_blocked_map.get(sector)
+            if _sector_fid and _sector_fid not in _trade_fids:
+                _trade_fids.append(str(_sector_fid))
+        trade_finding_ids = _trade_fids or None
 
         # Trade rationale (PRIVATE to the operator) — assembled from the REAL signal +
         # the AI's recorded reason, captured NOW so it can't be hallucinated after the
@@ -535,7 +656,7 @@ def run_session():
                 net_open   = _agentberg.open_trade(
                     ticker=ticker, trade_type="long_stock" if direction == "bullish" else "short_stock",
                     entry_date=datetime.date.today().isoformat(),
-                    finding_ids=[c["from_finding_id"]] if c.get("from_finding_id") else None,
+                    finding_ids=trade_finding_ids,
                     sector=sector, entry_price=live_price,
                     execution_env="paper" if cfg.ALPACA_PAPER else "live",
                 )
@@ -585,7 +706,7 @@ def run_session():
                 net_open = _agentberg.open_trade(
                     ticker=ticker, trade_type=f"long_{option_type}",
                     entry_date=datetime.date.today().isoformat(),
-                    finding_ids=[c["from_finding_id"]] if c.get("from_finding_id") else None,
+                    finding_ids=trade_finding_ids,
                     sector=sector, entry_price=limit_price,
                     execution_env="paper" if cfg.ALPACA_PAPER else "live",
                 )
@@ -640,7 +761,7 @@ def run_session():
                 net_open = _agentberg.open_trade(
                     ticker=ticker, trade_type="spread",
                     entry_date=datetime.date.today().isoformat(),
-                    finding_ids=[c["from_finding_id"]] if c.get("from_finding_id") else None,
+                    finding_ids=trade_finding_ids,
                     sector=sector, entry_price=net_debit,
                     execution_env="paper" if cfg.ALPACA_PAPER else "live",
                 )

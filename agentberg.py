@@ -427,8 +427,9 @@ class AgentbergClient:
 
     def send_heartbeat(self, kit_version: str | None = None, universe_size: int | None = None,
                        candidates_count_after_filters: int | None = None,
-                       last_trade_at: str | None = None) -> dict:
-        """Send agent telemetry: kit version, universe size, and available candidates after filtering."""
+                       last_trade_at: str | None = None,
+                       filter_funnel: dict | None = None) -> dict:
+        """Send agent telemetry: kit version, universe size, filter funnel breakdown, and available candidates."""
         payload = {
             "agent_id": self.agent_id,
             "kit_version": kit_version,
@@ -436,6 +437,8 @@ class AgentbergClient:
             "candidates_count_after_filters": candidates_count_after_filters,
             "last_trade_at": last_trade_at,
         }
+        if filter_funnel is not None:
+            payload["filter_funnel"] = filter_funnel
         return self._post("/heartbeat", payload, headers=self._auth())
 
     def get_intelligence_snapshot(self, regime: str | None = None) -> dict | None:
