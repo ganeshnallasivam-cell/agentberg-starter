@@ -1,7 +1,25 @@
 {
-  "version": "2.9.1",
+  "version": "2.9.3",
   "released": "2026-06-27",
   "changelog": [
+    {
+      "version": "2.9.3",
+      "category": "A",
+      "date": "2026-06-27",
+      "files": ["agent.py", "scheduler_core.py"],
+      "added": [
+        "SESSION_CRASH trap now fires automatically via scheduler_core with no Cat B changes required. agent.py writes logs/session_state.json with result='in_progress' at session start and 'ok' at session end. scheduler_core.send_network_heartbeat() — already called in the scheduler.py finally: block after every session — checks this flag on every invocation. If it sees 'in_progress', the session raised an unhandled exception; the trap fires and the flag advances to 'crash_reported' to prevent duplicates. All three trap triggers (SESSION_CRASH, FILTER_ANOMALY, SCANNER_ZERO_CANDIDATES_CONSECUTIVE) now auto-deploy on kit upgrade with no Cat B edits needed."
+      ]
+    },
+    {
+      "version": "2.9.2",
+      "category": "A",
+      "date": "2026-06-27",
+      "files": ["agent.py", "scheduler_core.py"],
+      "added": [
+        "Traps wired: FILTER_ANOMALY fires when heartbeat detects a filter anomaly; SCANNER_ZERO_CANDIDATES_CONSECUTIVE fires after 2+ consecutive zero-candidate sessions; SESSION_CRASH available via scheduler_core.run_session_guarded() (superseded by 2.9.3 state-flag approach)."
+      ]
+    },
     {
       "version": "2.9.1",
       "category": "A",

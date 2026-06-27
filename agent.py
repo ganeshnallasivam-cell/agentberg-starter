@@ -16,6 +16,7 @@ You are responsible for all trading decisions and outcomes.
 from __future__ import annotations
 
 import datetime
+import json as _json
 import os
 import sys
 import time
@@ -30,6 +31,18 @@ import structures
 from agentberg import AgentbergClient
 from alpaca import AlpacaClient
 from llm import rank_candidates
+
+_SESSION_STATE = os.path.join("logs", "session_state.json")
+
+
+def _write_session_state(result: str) -> None:
+    try:
+        os.makedirs("logs", exist_ok=True)
+        with open(_SESSION_STATE, "w") as _f:
+            _json.dump({"result": result, "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()}, _f)
+    except Exception:
+        pass
+
 
 def _compute_intraday_signals(ticker: str) -> dict | None:
     """Fetch today's 15-min bars and compute intraday RSI(14), VWAP, and distance
@@ -218,6 +231,7 @@ def run_session():
     """
     Full trading cycle. Call once at market open and once at close.
     """
+    _write_session_state("in_progress")
     migrations.run()
     memory.init_db()
     _phone_home()
@@ -686,9 +700,53 @@ def run_session():
             },
         )
         if hb and hb.get("anomaly"):
-            print(f"    [heartbeat] ⚠ {hb['anomaly_label']}: {hb['anomaly_detail']}")
+            label = hb["anomaly_label"]
+            detail = hb["anomaly_detail"]
+            print(f"    [heartbeat] ⚠ {label}: {detail}")
+            _agentberg.report_issue(
+                trap_name="FILTER_ANOMALY",
+                concern=f"{label}: {detail}",
+                severity="high",
+                diagnostics={
+                    "anomaly_label": label,
+                    "anomaly_detail": detail,
+                    "after_sector": _funnel_sector,
+                    "after_momentum": _funnel_momentum,
+                    "after_beta": _funnel_beta,
+                    "after_llm": _funnel_llm,
+                    "universe_size": universe_size,
+                },
+                kit_version=kit_version,
+            )
     except Exception as e:
         print(f"    [heartbeat] failed ({e})")
+
+    # ── Trap: zero candidates after all filters ────────────────────────────────
+    if _funnel_llm == 0:
+        recent = memory.get_session_history(days=7)
+        consecutive = 0
+        for s in recent:
+            if s.get("candidates_found", 1) == 0:
+                consecutive += 1
+            else:
+                break
+        if consecutive >= 2:
+            print(f"    [trap] ZERO_CANDIDATES — {consecutive} consecutive sessions with 0 candidates. Filing support case.")
+            _agentberg.report_issue(
+                trap_name="SCANNER_ZERO_CANDIDATES_CONSECUTIVE",
+                concern=f"0 candidates returned for {consecutive} consecutive sessions",
+                severity="high",
+                diagnostics={
+                    "regime": regime,
+                    "universe_size": universe_size,
+                    "after_sector": _funnel_sector,
+                    "after_momentum": _funnel_momentum,
+                    "after_beta": _funnel_beta,
+                    "after_llm": _funnel_llm,
+                    "consecutive_sessions": consecutive,
+                },
+                kit_version=kit_version,
+            )
 
     # ── Step 4: Execute ────────────────────────────────────────────────────────
     print(f"[4] Executing {len(candidates)} trade(s) ({mode})...")
@@ -977,6 +1035,8 @@ def run_session():
             )
             if result:
                 print(f"[reflect] Sector signal pushed to network (weak: {len(losing_sectors)}, strong: {len(winning_sectors)})")
+
+    _write_session_state("ok")
 
 
 def check_positions():

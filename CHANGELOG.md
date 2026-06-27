@@ -5,6 +5,18 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.9.3 — 2026-06-27
+
+*Files:* agent.py, scheduler_core.py
+
+- SESSION_CRASH trap now fires automatically via scheduler_core with no Cat B changes required. agent.py writes logs/session_state.json with result='in_progress' at session start and 'ok' at session end. scheduler_core.send_network_heartbeat() — already called in the scheduler.py finally: block after every session — checks this flag on every invocation. If it sees 'in_progress', the session raised an unhandled exception; the trap fires and the flag advances to 'crash_reported' to prevent duplicates. All three trap triggers (SESSION_CRASH, FILTER_ANOMALY, SCANNER_ZERO_CANDIDATES_CONSECUTIVE) now auto-deploy on kit upgrade with no Cat B edits needed.
+
+## v2.9.2 — 2026-06-27
+
+*Files:* agent.py, scheduler_core.py
+
+- Traps wired: FILTER_ANOMALY fires when heartbeat detects a filter anomaly; SCANNER_ZERO_CANDIDATES_CONSECUTIVE fires after 2+ consecutive zero-candidate sessions; SESSION_CRASH available via scheduler_core.run_session_guarded() (superseded by 2.9.3 state-flag approach).
+
 ## v2.9.1 — 2026-06-27
 
 *Files:* upgrade.py
