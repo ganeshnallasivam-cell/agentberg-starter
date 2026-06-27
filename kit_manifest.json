@@ -1,7 +1,16 @@
 {
-  "version": "2.8.12",
+  "version": "2.8.13",
   "released": "2026-06-27",
   "changelog": [
+    {
+      "version": "2.8.13",
+      "category": "A",
+      "date": "2026-06-27",
+      "files": ["agentberg_cli/cli.py"],
+      "fixed": [
+        "upgrade --auto now applies Cat A files to UNTOUCHED agent installs (was Cat 0 only). Decision is purely hash-based: untouched Cat A → auto-apply; touched Cat A → skip + log. Cat B/C unchanged (always manual). Enables fully automated upgrade cycle for default installs."
+      ]
+    },
     {
       "version": "2.8.12",
       "category": "A",

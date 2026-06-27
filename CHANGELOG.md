@@ -5,6 +5,11 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.8.13 — 2026-06-27
+
+*Files:* agentberg_cli/cli.py
+
+
 ## v2.8.12 — 2026-06-27
 
 *Files:* knowledge.py, agentberg_cli/cli.py, scheduler.py

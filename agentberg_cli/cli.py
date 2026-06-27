@@ -465,8 +465,8 @@ def _pending_entries(new_manifest: dict, adopted_version: str) -> list[dict]:
 
 
 def cmd_upgrade(args) -> None:
-    """Pull-to-review the latest kit. With --auto, apply Category 0 (advisory,
-    empty-safe, override-able) changes to UNTOUCHED files behind snapshot + verify."""
+    """Pull-to-review the latest kit. With --auto, apply Category 0 and A changes
+    to UNTOUCHED files behind snapshot + compile-verify + rollback."""
     folder = _folder(args)
     auto = getattr(args, "auto", False)
 
@@ -499,30 +499,33 @@ def cmd_upgrade(args) -> None:
             return
 
         pending = _pending_entries(new_manifest, adopted["version"])
-        cat0 = [e for e in pending if str(e.get("category")) == "0"]
-        review = [e for e in pending if str(e.get("category")) != "0"]
+        # Cat 0 + A → eligible for auto-apply (gated by untouched-file check).
+        # Cat B + C → never auto: identity files and merge-not-replace configs.
+        auto_entries = [e for e in pending if str(e.get("category")) in ("0", "A")]
+        hard_block   = [e for e in pending if str(e.get("category")) not in ("0", "A")]
 
         print(f"\nUpgrade available: v{adopted['version']} → v{latest}")
-        print(f"  Category 0 (auto-apply, advisory/empty-safe): {len(cat0)} version(s)")
-        print(f"  Category A/B (manual review per UPGRADING.md):  {len(review)} version(s)")
+        print(f"  Cat 0/A (auto if untouched): {len(auto_entries)} version(s)")
+        print(f"  Cat B/C (always manual):     {len(hard_block)} version(s)")
 
         if not auto:
-            for e in cat0:
-                print(f"\n  [0] v{e['version']} — would auto-apply:")
-                for line in e.get("added", []):
+            for e in auto_entries:
+                cat = e.get("category", "?")
+                print(f"\n  [{cat}] v{e['version']} — would auto-apply (if untouched):")
+                for line in e.get("added", e.get("fixed", [])):
                     print(f"        • {line[:100]}")
-            if review:
-                print("\n  Needs your review (run UPGRADING.md procedure):")
-                for e in review:
+            if hard_block:
+                print("\n  Always-manual (run UPGRADING.md procedure):")
+                for e in hard_block:
                     print(f"     [{e.get('category','?')}] v{e['version']} ({', '.join(e.get('files', []))})")
-            print("\nRun `agentberg upgrade --auto` to apply the Category 0 changes safely.")
+            print("\nRun `agentberg upgrade --auto` to apply eligible changes.")
             return
 
-        # ── AUTO-APPLY Category 0 ────────────────────────────────────────────────
-        if not cat0:
-            print("\nNothing to auto-apply (no Category 0 changes pending).")
-            if review:
-                print("Pending A/B changes need manual review — see UPGRADING.md.")
+        # ── AUTO-APPLY Cat 0 + Cat A (untouched files only) ─────────────────────
+        if not auto_entries:
+            print("\nNothing to auto-apply (no Cat 0/A changes pending).")
+            if hard_block:
+                print("Pending B/C changes need manual review — see UPGRADING.md.")
             return
 
         # GATE 1: snapshot the whole folder before touching anything.
@@ -531,15 +534,18 @@ def cmd_upgrade(args) -> None:
         shutil.copytree(folder, backup)
         print(f"\n  snapshot: {backup}")
 
-        # Files in scope = every file named by a Category 0 entry, de-duped.
-        files0: list[str] = []
-        for e in cat0:
+        # Build de-duped file list: (rel, category) from all auto-eligible entries.
+        files_auto: list[tuple[str, str]] = []
+        seen_rels: set[str] = set()
+        for e in auto_entries:
+            cat = str(e.get("category", "0"))
             for rel in e.get("files", []):
-                if rel not in files0:
-                    files0.append(rel)
+                if rel not in seen_rels:
+                    files_auto.append((rel, cat))
+                    seen_rels.add(rel)
 
-        applied, skipped, missing = [], [], []
-        for rel in files0:
+        applied, skipped_touched, missing = [], [], []
+        for rel, _cat in files_auto:
             if rel.split("/")[0] in _SCAFFOLD_EXCLUDE:
                 continue  # never inject CLI/dev files into agent folders
             src = newdir / rel
@@ -554,7 +560,7 @@ def cmd_upgrade(args) -> None:
                     continue  # already identical — no-op
                 # GATE 2: only replace files the agent has NOT customized.
                 if base_hash is not None and cur_hash != base_hash:
-                    skipped.append(rel)
+                    skipped_touched.append(rel)
                     continue
             cur.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, cur)
@@ -570,31 +576,35 @@ def cmd_upgrade(args) -> None:
                 shutil.move(str(backup), str(folder))
                 sys.exit(f"Compile failed after apply — rolled back from snapshot.\n{res.stderr}")
 
-        # Record new state. Advance the adopted version to latest ONLY if no A/B
-        # entries are still pending; otherwise keep it pinned so they stay flagged.
+        # Advance adopted version to latest ONLY when nothing remains pending:
+        # no hard-block (B/C) entries AND no Cat A files the agent customized.
         for rel in applied:
             adopted["files"][rel] = _sha256(folder / rel)
-        if not review:
+        pin = bool(hard_block) or bool(skipped_touched)
+        if not pin:
             adopted["version"] = latest
             _sync_pyproject_version(folder, latest)
         _save_adopted(folder, adopted)
 
-        print(f"\n✓ Applied {len(applied)} file(s) from {len(cat0)} Category 0 release(s).")
+        n_entries = len(auto_entries)
+        print(f"\n✓ Applied {len(applied)} file(s) from {n_entries} Cat 0/A release(s).")
         for rel in applied:
             print(f"    updated  {rel}")
-        for rel in skipped:
-            print(f"    skipped  {rel}  (you customized it — review manually)")
+        for rel in skipped_touched:
+            print(f"    skipped  {rel}  (customized — review manually)")
         for rel in missing:
             print(f"    missing  {rel}  (not in latest kit — skipped)")
-        if review:
-            print(f"\n  {len(review)} Category A/B release(s) still need manual review (UPGRADING.md):")
-            for e in review:
+        if hard_block:
+            print(f"\n  {len(hard_block)} Cat B/C release(s) always need manual review (UPGRADING.md):")
+            for e in hard_block:
                 print(f"     [{e.get('category','?')}] v{e['version']}")
-            print(f"  Adopted version stays at v{adopted['version']} until those are reviewed.")
+        if skipped_touched:
+            print(f"\n  {len(skipped_touched)} file(s) skipped (customized). Review and re-run to advance version.")
+        if pin:
+            print(f"  Adopted version stays at v{adopted['version']} until pending items are reviewed.")
         else:
             print(f"\n  Now at v{latest}.")
-        print(f"\n  Verify: `agentberg run` once. With the network off, behavior should be")
-        print(f"  unchanged (Category 0 is advisory). Snapshot kept at {backup}")
+        print(f"\n  Snapshot kept at {backup}")
 
         # ── Signal running scheduler to restart with new code ────────────────────
         if applied:
@@ -610,7 +620,7 @@ def cmd_upgrade(args) -> None:
 
 
 def cmd_update(args) -> None:
-    # `update` is the propose-only view; `upgrade --auto` applies Category 0.
+    # `update` is the propose-only view; `upgrade --auto` applies Cat 0/A (untouched files).
     cmd_upgrade(args)
 
 
