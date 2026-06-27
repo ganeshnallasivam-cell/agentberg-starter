@@ -5,6 +5,18 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.9.0 — 2026-06-27
+
+*Files:* upgrade.py
+
+- Fix: upgrade.py no longer sends a separate heartbeat after upgrading. The heartbeat was unsigned (stdlib-only, no crypto) and would 401 for any agent registered with a keypair. The server now records kit_version + last_seen_at from the upgrade telemetry itself — upgrade telemetry is the heartbeat.
+
+## v2.8.20 — 2026-06-27
+
+*Files:* upgrade.py
+
+- Fix: upgrade.py no longer requires two runs on a fresh machine. Previously, first run on a machine with no .agentberg_adopted.json would create the baseline and exit — requiring a manual second run to actually upgrade and fire telemetry. Now continues into the upgrade check in the same run. Single command = single upgrade.
+
 ## v2.8.19 — 2026-06-27
 
 *Files:* agentberg.py, agent.py
