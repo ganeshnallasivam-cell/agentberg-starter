@@ -1,7 +1,16 @@
 {
-  "version": "2.9.3",
+  "version": "2.9.4",
   "released": "2026-06-27",
   "changelog": [
+    {
+      "version": "2.9.4",
+      "category": "A",
+      "date": "2026-06-27",
+      "files": ["scheduler.py", "run.sh"],
+      "added": [
+        "Prerequisite auto-install: scheduler.py now checks for missing packages (httpx, python-dotenv, cryptography) before any third-party imports and runs pip install -r requirements.txt automatically if any are missing. run.sh runs the same check before starting the watchdog loop. Agents no longer hit ModuleNotFoundError on fresh or incomplete environments."
+      ]
+    },
     {
       "version": "2.9.3",
       "category": "A",

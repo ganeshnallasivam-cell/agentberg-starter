@@ -18,11 +18,44 @@ Background:
 
 from __future__ import annotations
 
+import importlib
+import subprocess
+import sys
+from pathlib import Path as _Path
+
+# ── Prerequisite bootstrap — runs before any third-party imports ─────────────
+# Checks for required packages and auto-installs from requirements.txt if any
+# are missing. Silent if everything is already installed.
+def _ensure_prerequisites() -> None:
+    _req_file = _Path(__file__).parent / "requirements.txt"
+    if not _req_file.exists():
+        return
+    packages = [
+        line.split(">=")[0].split("==")[0].split("[")[0].strip().replace("-", "_").lower()
+        for line in _req_file.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    missing = []
+    for pkg in packages:
+        import_name = {"python_dotenv": "dotenv"}.get(pkg, pkg)
+        try:
+            importlib.import_module(import_name)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        print(f"[startup] Missing packages: {', '.join(missing)} — auto-installing...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-r", str(_req_file)],
+            stdout=subprocess.DEVNULL,
+        )
+        print("[startup] Prerequisites installed — continuing")
+
+_ensure_prerequisites()
+# ─────────────────────────────────────────────────────────────────────────────
+
 import datetime
 import logging
-import sys
 import time
-from pathlib import Path
 
 from agent import run_session
 import memory

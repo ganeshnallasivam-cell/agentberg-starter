@@ -21,6 +21,12 @@ PYTHON="${PYTHON:-python3}"
 
 mkdir -p logs
 
+# Install any missing prerequisites before first start
+if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+    echo "[startup] Checking prerequisites..."
+    "$PYTHON" -m pip install -r "$SCRIPT_DIR/requirements.txt" --quiet --disable-pip-version-check
+fi
+
 echo "[watchdog] $(date) — starting scheduler. Ctrl-C to stop."
 
 while true; do
