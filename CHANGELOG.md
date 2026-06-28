@@ -5,6 +5,24 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.10.1 — 2026-06-28
+
+*Files:* memory.py, agentberg.py
+
+- persist_finding(finding_id, confidence, finding=None): agent-driven local persistence of network findings. Writes to new persisted_findings SQLite table. Agent controls the confidence threshold — network never forces adoption. If finding dict is already in hand, pass it directly; otherwise kit fetches from network. Upserts on finding_id so re-persisting at new confidence replaces old entry. Companion get_persisted_findings(min_confidence=0.0) reads them back. window_days field confirmed end-to-end: compute_attribution() already accepts and returns window_days; attribution report schema and DB store it; agent.py passes it through. Category 0 decision logic (compute_window_days based on strategy_type + regime) deferred to future kit version.
+
+## v2.10.0 — 2026-06-28
+
+*Files:* llm.py, agent.py, config.py
+
+- L1/L2/L3 three-layer decision architecture. L1 (session_stance): one LLM call per cycle produces session_stance with stance (green/amber/red), risk_budget, max_concurrent, focus, forbidden_sectors, trusted_sectors. L2 (rank_candidates_v2): LLM ranks candidates into primaries + buffer (50% excess); conviction-weighted pre-allocation using squared scores; L1 stance + focus threaded into prompt. L3 (trade_decision): one LLM call per primary with fixed pre-allocated budget; L1 stance block surfaced directly (no re-derivation). Buffer fill: C²-proportional share, not inherited primary allocation. Conviction tiers forced (0.85 HIGH / 0.75 MID / 0.58 LOW). L3 failure (LLM timeout, bad JSON, no adapter) halts execution and fires report_issue with severity=critical and trap_name=L3_EXECUTION_FAILURE; deliberate execute=False skips still pull buffer as before. Alert email on L3 halt via SMTP (ALERT_EMAIL + SMTP_USER + SMTP_PASS in .env). Safety fixes: execute=False default (LLM failure no longer fires a trade); _safe_float() helper prevents ValueError on non-numeric LLM output. _extract_json_array/_object use text.find('```') to handle LLM preamble. config.py adds ALERT_EMAIL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS.
+
+## v2.9.4 — 2026-06-27
+
+*Files:* scheduler.py, run.sh
+
+- Prerequisite auto-install: scheduler.py now checks for missing packages (httpx, python-dotenv, cryptography) before any third-party imports and runs pip install -r requirements.txt automatically if any are missing. run.sh runs the same check before starting the watchdog loop. Agents no longer hit ModuleNotFoundError on fresh or incomplete environments.
+
 ## v2.9.3 — 2026-06-27
 
 *Files:* agent.py, scheduler_core.py
