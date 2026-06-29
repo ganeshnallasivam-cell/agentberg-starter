@@ -546,6 +546,18 @@ class AgentbergClient:
             "message_ids": message_ids,
         }, headers=self._auth())
 
+    def send_inbox_reply(self, recipient_id: str, subject: str, body: str,
+                         in_reply_to: str | None = None) -> dict:
+        """Send a message to the platform inbox — used by ASK decisions to request more info."""
+        return self._post("/inbox", {
+            "sender_id": self.agent_id,
+            "sender_type": "agent",
+            "recipient_id": recipient_id,
+            "subject": subject,
+            "body": body,
+            "in_reply_to": in_reply_to,
+        }, headers=self._auth())
+
     def report_issue(
         self,
         trap_name: str,

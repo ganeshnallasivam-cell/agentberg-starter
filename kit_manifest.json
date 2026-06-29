@@ -1,7 +1,16 @@
 {
-  "version": "2.10.2",
+  "version": "2.10.3",
   "released": "2026-06-29",
   "changelog": [
+    {
+      "version": "2.10.3",
+      "category": "A",
+      "date": "2026-06-29",
+      "files": ["agent.py", "agentberg.py", "llm.py"],
+      "added": [
+        "ASK decision type in guidance cycle: when the LLM cannot fully assess validity or risk, it generates a specific follow-up question instead of deferring passively. Kit sends the question back to the platform via POST /inbox (sender=this agent, in_reply_to=original message_id). The original message stays pending (not ACK'd) so the next heartbeat re-evaluates when the answer arrives. New AgentbergClient.send_inbox_reply() method. llm.evaluate_guidance() now returns follow_up_question field when decision=ASK. Decision logic: APPLY/DEFER/REJECT unchanged; ASK fires when info is missing. Difference from DEFER: DEFER is passive wait; ASK is the agent taking initiative to unblock itself."
+      ]
+    },
     {
       "version": "2.10.2",
       "category": "A",

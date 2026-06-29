@@ -1370,8 +1370,26 @@ def run_guidance_cycle(inbox_messages: list[dict]) -> None:
         if decision == "APPLY" and changes:
             print(f"    Applying {len(changes)} change(s):")
             _apply_guidance_changes(changes)
+            message_ids_to_ack.append(msg_id)
 
-        message_ids_to_ack.append(msg_id)
+        elif decision == "ASK":
+            question = verdict.get("follow_up_question", "")
+            if question:
+                sender_id = msg.get("sender_id", "platform")
+                try:
+                    _agentberg.send_inbox_reply(
+                        recipient_id=sender_id,
+                        subject=f"Re: {subject}",
+                        body=question,
+                        in_reply_to=msg_id,
+                    )
+                    print(f"    Follow-up sent to {sender_id}: {question[:100]}")
+                except Exception as e:
+                    print(f"    ASK reply failed ({e})")
+            # Do NOT ACK — message stays pending until answer arrives
+
+        else:
+            message_ids_to_ack.append(msg_id)
 
     if message_ids_to_ack:
         try:

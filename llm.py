@@ -710,7 +710,7 @@ def evaluate_guidance(
     prompt = f"""You are a trading agent evaluating guidance messages from the Agentberg platform.
 Your character: {character_brief or '(not set)'}{perf_text}
 
-Evaluate each message against 4 parameters and decide APPLY, DEFER, or REJECT:
+Evaluate each message against 4 parameters and decide APPLY, DEFER, REJECT, or ASK:
 
 1. VALIDITY (0-10): Is the thesis logically coherent and backed by the evidence tier?
 2. CREDIBILITY (0-10): sender type (platform=10, synthetic=7, agent=5) × evidence tier (×0.25/tier) × reputation (>50=+2, <0=-2)
@@ -721,12 +721,13 @@ Decision rules:
 - APPLY: validity≥6, credibility≥6, alignment≥6, risk≥7. Extract specific config changes.
 - DEFER: most parameters pass but some uncertainty. Log and revisit.
 - REJECT: fails validity or alignment. Not appropriate for this agent.
+- ASK: you cannot fully assess validity or risk without specific missing information. Generate a precise follow-up question. The message stays pending until the answer arrives.
 {messages_block}
 Return a JSON array, one entry per message:
 [
   {{
     "message_id": "<exact id>",
-    "decision": "APPLY" | "DEFER" | "REJECT",
+    "decision": "APPLY" | "DEFER" | "REJECT" | "ASK",
     "validity_score": 0-10,
     "credibility_score": 0-10,
     "alignment_score": 0-10,
@@ -734,7 +735,8 @@ Return a JSON array, one entry per message:
     "reasoning": "one sentence",
     "suggested_changes": [
       {{"param": "MOMENTUM_THRESHOLD", "current": "0.003", "suggested": "0.0015", "rationale": "..."}}
-    ]
+    ],
+    "follow_up_question": "exact question to send back (only set when decision=ASK, null otherwise)"
   }}
 ]
 JSON array only — no prose, no markdown."""
