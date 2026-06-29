@@ -195,6 +195,9 @@ def _network_section(network_signals: dict | None) -> str:
 
 def _build_prompt(candidates, regime, risk_level, health_label, blocked_sectors,
                   network_signals=None, performance_context=None) -> str:
+    import datetime as _dt, zoneinfo as _zi
+    _now_et = _dt.datetime.now(_zi.ZoneInfo("America/New_York"))
+    _date_line = f"- Today: {_now_et.strftime('%A %Y-%m-%d')} (Eastern Time)"
     return f"""You are a disciplined autonomous trading agent reviewing candidates.
 
 You are NOT making a one-time decision. You are an agent that improves toward your
@@ -202,6 +205,7 @@ operator's goals over time. Review your own track record below and use it — no
 market signals — to decide which candidates are worth trading NOW.
 {_performance_section(performance_context)}
 Market context:
+{_date_line}
 - Regime: {regime or "unknown"}
 - Risk level: {risk_level or "unknown"}
 - Market health: {health_label or "unknown"}
@@ -440,7 +444,11 @@ def _build_rank_v2_prompt(
             f"- Stance: {l1_stance.upper()} | Focus: {focus or 'momentum'} | Slots: {max_concurrent}\n"
             f"- Prioritise candidates that fit the '{focus or 'momentum'}' strategy.\n"
         )
+    import datetime as _dt, zoneinfo as _zi
+    _now_et = _dt.datetime.now(_zi.ZoneInfo("America/New_York"))
+    _date_line = f"Today: {_now_et.strftime('%A %Y-%m-%d')} (Eastern Time)"
     return f"""You are ranking candidates into two lists for this trading cycle.
+{_date_line}
 
 PRIMARY LIST ({max_concurrent} slots): candidates that WILL receive pre-allocated capital.
 BUFFER LIST ({buffer_count} slots): backup candidates that fill a slot if a primary is rejected at execution.

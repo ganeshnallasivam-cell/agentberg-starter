@@ -1,7 +1,16 @@
 {
-  "version": "2.10.4",
+  "version": "2.10.5",
   "released": "2026-06-29",
   "changelog": [
+    {
+      "version": "2.10.5",
+      "category": "A",
+      "date": "2026-06-29",
+      "files": ["llm.py"],
+      "fixed": [
+        "Inject current date (Eastern Time) into L1 and L2 ranking prompts. LLM providers (agy, codex) may cache their session date from initialization time — without explicit injection, agents initialized on Sunday would believe it was still Sunday even after Monday's upgrade. Fix: both _build_prompt() and the L2 ranking prompt now include 'Today: <day> <date> (Eastern Time)' as the first market context line."
+      ]
+    },
     {
       "version": "2.10.4",
       "category": "B",
