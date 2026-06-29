@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Validate that pyproject.toml version matches kit_manifest.json version.
+"""Validate that all version markers agree with kit_manifest.json.
 
-CI runs this so a kit release that bumps kit_manifest.json but forgets
-pyproject.toml is caught before publish.
+Checks three independent files so a bump that forgets any one of them is
+caught before CI or publish runs.
 
-  validate_version_sync.py          exit 1 on mismatch
+  validate_version_sync.py          exit 1 on any mismatch
 
 Stdlib-only.
 """
@@ -17,13 +17,26 @@ ROOT = Path(__file__).parent.parent
 
 manifest_version = json.loads((ROOT / "kit_manifest.json").read_text()).get("version", "")
 
-pyproject_text = (ROOT / "pyproject.toml").read_text()
-m = re.search(r'^version\s*=\s*"([^"]+)"', pyproject_text, re.MULTILINE)
-pyproject_version = m.group(1) if m else ""
+def _extract(path: Path, pattern: str) -> str:
+    m = re.search(pattern, path.read_text(), re.MULTILINE)
+    return m.group(1) if m else ""
 
-if manifest_version != pyproject_version:
-    print(f"VERSION MISMATCH: kit_manifest.json={manifest_version!r}  pyproject.toml={pyproject_version!r}")
-    print("Both must be bumped together on every release.")
+checks = {
+    "pyproject.toml":           _extract(ROOT / "pyproject.toml",          r'^version\s*=\s*"([^"]+)"'),
+    "agentberg_cli/__init__.py": _extract(ROOT / "agentberg_cli/__init__.py", r'__version__\s*=\s*"([^"]+)"'),
+}
+
+mismatches = [
+    f"  {name}: {ver!r} != kit_manifest {manifest_version!r}"
+    for name, ver in checks.items()
+    if ver != manifest_version
+]
+
+if mismatches:
+    print(f"VERSION MISMATCH — kit_manifest.json={manifest_version!r}")
+    for line in mismatches:
+        print(line)
+    print("All three must be bumped together on every release.")
     sys.exit(1)
 
 print(f"OK: versions in sync at {manifest_version}")

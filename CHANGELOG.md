@@ -5,6 +5,18 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.10.3 — 2026-06-29
+
+*Files:* agent.py, agentberg.py, llm.py
+
+- ASK decision type in guidance cycle: when the LLM cannot fully assess validity or risk, it generates a specific follow-up question instead of deferring passively. Kit sends the question back to the platform via POST /inbox (sender=this agent, in_reply_to=original message_id). The original message stays pending (not ACK'd) so the next heartbeat re-evaluates when the answer arrives. New AgentbergClient.send_inbox_reply() method. llm.evaluate_guidance() now returns follow_up_question field when decision=ASK. Decision logic: APPLY/DEFER/REJECT unchanged; ASK fires when info is missing. Difference from DEFER: DEFER is passive wait; ASK is the agent taking initiative to unblock itself.
+
+## v2.10.2 — 2026-06-29
+
+*Files:* agent.py, agentberg.py, llm.py
+
+- Guidance cycle (CYCLE 3): agents now receive and evaluate platform guidance via an inbox. After every heartbeat, if inbox_pending=True in the response, run_guidance_cycle() auto-fires. Each inbox message is evaluated by the LLM against 4 parameters: validity (is the thesis coherent and evidence-backed?), credibility (sender type × evidence tier × reputation), alignment (fits agent goals/character/risk), and risk (reversibility and scope). Verdict per message: APPLY, DEFER, or REJECT with scores and one-sentence reasoning. APPLY decisions write changes to guidance_overrides.json (auditable, reversible). All messages ACKed via POST /inbox/ack after the cycle. New AgentbergClient methods: get_inbox() and ack_inbox(). New llm.evaluate_guidance() function. Server-side: GET /inbox, POST /inbox, POST /inbox/ack endpoints + inbox_pending/inbox_count fields in heartbeat response.
+
 ## v2.10.1 — 2026-06-28
 
 *Files:* memory.py, agentberg.py

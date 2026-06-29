@@ -29,5 +29,21 @@ jobs:
       - name: Upgrade categories valid (Category 0 stays advisory)
         run: python scripts/validate_categories.py
 
-      - name: pyproject.toml version matches kit_manifest.json
+      - name: pyproject.toml + __init__.py version matches kit_manifest.json
         run: python scripts/validate_version_sync.py
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -X POST "https://slack.com/api/chat.postMessage" \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"channel\": \"C0BAHFC29C6\",
+              \"text\": \":x: *agentberg-starter CI failed*\nCommit: \`${COMMIT_SHA}\` — ${COMMIT_MSG}\n<${RUN_URL}|View run>\nFix, commit, push to close.\"
+            }"
