@@ -531,6 +531,21 @@ class AgentbergClient:
             print(f"[agentberg] network coverage unavailable ({e})")
             return None
 
+    def get_inbox(self) -> list[dict]:
+        """Fetch unread guidance messages from the Agentberg platform inbox."""
+        try:
+            return self._get("/inbox", params={"agent_id": self.agent_id})
+        except Exception as e:
+            print(f"[agentberg] inbox unavailable ({e})")
+            return []
+
+    def ack_inbox(self, message_ids: list[str]) -> dict:
+        """Mark inbox messages as processed after the guidance cycle runs."""
+        return self._post("/inbox/ack", {
+            "agent_id": self.agent_id,
+            "message_ids": message_ids,
+        }, headers=self._auth())
+
     def report_issue(
         self,
         trap_name: str,

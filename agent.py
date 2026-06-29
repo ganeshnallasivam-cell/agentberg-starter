@@ -33,7 +33,7 @@ import structures
 from agentberg import AgentbergClient
 from alpaca import AlpacaClient
 import llm as _llm
-from llm import rank_candidates, rank_candidates_v2, session_stance, trade_decision
+from llm import rank_candidates, rank_candidates_v2, session_stance, trade_decision, evaluate_guidance
 
 _SESSION_STATE = os.path.join("logs", "session_state.json")
 
@@ -767,6 +767,7 @@ def run_session():
         kit_version = None
 
     universe_size = sum(len(v) for v in cfg.WATCHLIST.values())
+    hb = None
     try:
         hb = _agentberg.send_heartbeat(
             kit_version=kit_version,
@@ -800,6 +801,15 @@ def run_session():
             )
     except Exception as e:
         print(f"    [heartbeat] failed ({e})")
+
+    # ── Guidance cycle: triggered when inbox has unread messages ──────────────
+    if hb and hb.get("inbox_pending"):
+        try:
+            inbox_messages = _agentberg.get_inbox()
+            if inbox_messages:
+                run_guidance_cycle(inbox_messages)
+        except Exception as e:
+            print(f"    [guidance] failed ({e})")
 
     # ── Trap: zero candidates after all filters ────────────────────────────────
     if _funnel_llm == 0:
@@ -1310,6 +1320,98 @@ def check_positions():
             _record_close(symbol, reason, unrealised_pnl_pct)
         except Exception as e:
             print(f"[monitor] Close failed {symbol}: {e}")
+
+
+def run_guidance_cycle(inbox_messages: list[dict]) -> None:
+    """
+    GUIDANCE CYCLE (CYCLE 3): Evaluate Agentberg guidance messages and apply warranted changes.
+
+    Triggered automatically by run_session() when heartbeat returns inbox_pending=True.
+    Each message is evaluated against 4 parameters before any change is applied:
+      1. Validity   — is the thesis logically coherent and evidence-backed?
+      2. Credibility — sender type × evidence tier × reputation score
+      3. Alignment  — does it fit this agent's goals, risk tolerance, and character?
+      4. Risk       — scope of change, reversibility, paper vs live
+    """
+    if not inbox_messages:
+        return
+
+    print(f"\n[guidance] {len(inbox_messages)} message(s) from Agentberg:")
+    for msg in inbox_messages:
+        subject = (msg.get("subject") or "(no subject)")[:60]
+        sender_type = msg.get("sender_type", "platform")
+        print(f"    • [{sender_type}] from {msg.get('sender_id', '?')}: {subject}")
+
+    char_brief = character.brief() if character.is_set() else ""
+    try:
+        track_record = {"stats": memory.get_summary_stats(days=90)}
+    except Exception:
+        track_record = {}
+
+    verdicts = evaluate_guidance(inbox_messages, char_brief, track_record)
+
+    message_ids_to_ack: list[str] = []
+    for msg, verdict in zip(inbox_messages, verdicts or []):
+        msg_id = msg.get("message_id", "?")
+        decision = verdict.get("decision", "DEFER")
+        reasoning = verdict.get("reasoning", "")
+        changes = verdict.get("suggested_changes") or []
+
+        v = verdict.get("validity_score", "?")
+        c = verdict.get("credibility_score", "?")
+        a = verdict.get("alignment_score", "?")
+        r = verdict.get("risk_score", "?")
+        subject = (msg.get("subject") or "message")[:50]
+
+        print(f"\n    [{decision}] {subject}")
+        print(f"    Validity:{v} Credibility:{c} Alignment:{a} Risk:{r}")
+        print(f"    Reasoning: {reasoning}")
+
+        if decision == "APPLY" and changes:
+            print(f"    Applying {len(changes)} change(s):")
+            _apply_guidance_changes(changes)
+
+        message_ids_to_ack.append(msg_id)
+
+    if message_ids_to_ack:
+        try:
+            _agentberg.ack_inbox(message_ids_to_ack)
+            print(f"\n[guidance] ACKed {len(message_ids_to_ack)} message(s)")
+        except Exception as e:
+            print(f"[guidance] ACK failed ({e})")
+
+
+def _apply_guidance_changes(changes: list[dict]) -> None:
+    """Write APPLY decisions to guidance_overrides.json for audit and next-session awareness."""
+    import json as _json_inner
+    overrides_path = os.path.join(os.path.dirname(__file__), "guidance_overrides.json")
+    try:
+        with open(overrides_path) as f:
+            existing = _json_inner.load(f)
+    except Exception:
+        existing = {"applied": []}
+
+    for change in changes:
+        param = change.get("param", "")
+        suggested = change.get("suggested", "")
+        rationale = change.get("rationale", "")
+        if not param or suggested == "":
+            continue
+        print(f"        {param}: {change.get('current', '?')} → {suggested} ({rationale[:60]})")
+        existing["applied"].append({
+            "param": param,
+            "current": change.get("current"),
+            "value": suggested,
+            "rationale": rationale,
+            "applied_at": datetime.datetime.utcnow().isoformat(),
+        })
+
+    try:
+        with open(overrides_path, "w") as f:
+            _json_inner.dump(existing, f, indent=2)
+        print(f"        → saved to guidance_overrides.json ({len(changes)} change(s))")
+    except Exception as e:
+        print(f"        → save failed ({e})")
 
 
 def _record_close(symbol: str, reason: str, pnl_pct: float):

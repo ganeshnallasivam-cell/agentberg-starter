@@ -643,3 +643,113 @@ def trade_decision(
         ticker = candidate.get("ticker", "?")
         print(f"    [{adapter.NAME}] L3 {ticker} failed ({e}) — halting (safety)")
         return dict(_defaults)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# GUIDANCE CYCLE: Evaluate inbox messages from Agentberg against 4 parameters
+# ────────────────────────────────────────────────────────────────────────────
+
+_EVIDENCE_TIER_LABELS = {
+    0: "Claimed (no proof)",
+    1: "Community validated (5+ votes)",
+    2: "Evidenced (paper/live trade records)",
+    3: "Verified (3 independent replications)",
+}
+
+_GUIDANCE_DEFER: dict = {"decision": "DEFER", "reasoning": "", "suggested_changes": [],
+                          "validity_score": 5, "credibility_score": 5,
+                          "alignment_score": 5, "risk_score": 5}
+
+
+def evaluate_guidance(
+    messages: list[dict],
+    character_brief: str | None = None,
+    track_record: dict | None = None,
+) -> list[dict]:
+    """
+    GUIDANCE CYCLE — evaluate each inbox message against 4 parameters.
+
+    Returns one verdict per message:
+      decision: APPLY | DEFER | REJECT
+      validity_score, credibility_score, alignment_score, risk_score: 0-10
+      reasoning: one-sentence explanation
+      suggested_changes: list of {param, current, suggested, rationale} dicts (APPLY only)
+    """
+    if not messages:
+        return []
+    if os.environ.get("LLM_REASONING", "").lower() == "off":
+        return [dict(_GUIDANCE_DEFER, message_id=m.get("message_id"), reasoning="LLM_REASONING=off")
+                for m in messages]
+
+    adapter = _select_adapter()
+    if adapter is None:
+        return [dict(_GUIDANCE_DEFER, message_id=m.get("message_id"), reasoning="No LLM provider available")
+                for m in messages]
+
+    perf_text = ""
+    if track_record:
+        stats = track_record.get("stats") or {}
+        if stats.get("total_trades", 0) > 0:
+            perf_text = (
+                f"\nYour track record: {stats.get('win_rate', 0):.0%} WR over "
+                f"{stats['total_trades']} trades | net P&L ${stats.get('net_pnl', 0):+,.0f}"
+            )
+
+    messages_block = ""
+    for i, msg in enumerate(messages, 1):
+        tier = msg.get("evidence_tier", 0)
+        messages_block += (
+            f"\nMessage {i} (id: {msg.get('message_id', '?')}):\n"
+            f"  From: {msg.get('sender_id', '?')} ({msg.get('sender_type', 'platform')})\n"
+            f"  Sender reputation: {msg.get('sender_reputation', 0.0):.1f}\n"
+            f"  Evidence tier: {tier} — {_EVIDENCE_TIER_LABELS.get(tier, 'Unknown')}\n"
+            f"  Subject: {msg.get('subject') or '(no subject)'}\n"
+            f"  Body: {msg.get('body', '')}\n"
+        )
+
+    prompt = f"""You are a trading agent evaluating guidance messages from the Agentberg platform.
+Your character: {character_brief or '(not set)'}{perf_text}
+
+Evaluate each message against 4 parameters and decide APPLY, DEFER, or REJECT:
+
+1. VALIDITY (0-10): Is the thesis logically coherent and backed by the evidence tier?
+2. CREDIBILITY (0-10): sender type (platform=10, synthetic=7, agent=5) × evidence tier (×0.25/tier) × reputation (>50=+2, <0=-2)
+3. ALIGNMENT (0-10): Does it fit your goals, risk tolerance, and character?
+4. RISK (0-10, 10=safe): How reversible is the change? Paper mode = score 10. Live mode = score by impact.
+
+Decision rules:
+- APPLY: validity≥6, credibility≥6, alignment≥6, risk≥7. Extract specific config changes.
+- DEFER: most parameters pass but some uncertainty. Log and revisit.
+- REJECT: fails validity or alignment. Not appropriate for this agent.
+{messages_block}
+Return a JSON array, one entry per message:
+[
+  {{
+    "message_id": "<exact id>",
+    "decision": "APPLY" | "DEFER" | "REJECT",
+    "validity_score": 0-10,
+    "credibility_score": 0-10,
+    "alignment_score": 0-10,
+    "risk_score": 0-10,
+    "reasoning": "one sentence",
+    "suggested_changes": [
+      {{"param": "MOMENTUM_THRESHOLD", "current": "0.003", "suggested": "0.0015", "rationale": "..."}}
+    ]
+  }}
+]
+JSON array only — no prose, no markdown."""
+
+    try:
+        raw = adapter.run(prompt)
+        payload = _extract_json_array(raw)
+        if payload is None:
+            print(f"    [{adapter.NAME}] guidance eval: no JSON — DEFER all")
+            return [dict(_GUIDANCE_DEFER, message_id=m.get("message_id"), reasoning="LLM returned no JSON")
+                    for m in messages]
+        results = json.loads(payload)
+        return results if isinstance(results, list) else [dict(_GUIDANCE_DEFER, message_id=m.get("message_id"))
+                                                          for m in messages]
+    except Exception as e:
+        print(f"    [{adapter.NAME}] guidance eval failed ({e}) — DEFER all")
+        return [dict(_GUIDANCE_DEFER, message_id=m.get("message_id"), reasoning=f"LLM error: {e}")
+                for m in messages]

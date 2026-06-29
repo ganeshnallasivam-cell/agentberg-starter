@@ -1,7 +1,16 @@
 {
-  "version": "2.10.1",
-  "released": "2026-06-28",
+  "version": "2.10.2",
+  "released": "2026-06-29",
   "changelog": [
+    {
+      "version": "2.10.2",
+      "category": "A",
+      "date": "2026-06-29",
+      "files": ["agent.py", "agentberg.py", "llm.py"],
+      "added": [
+        "Guidance cycle (CYCLE 3): agents now receive and evaluate platform guidance via an inbox. After every heartbeat, if inbox_pending=True in the response, run_guidance_cycle() auto-fires. Each inbox message is evaluated by the LLM against 4 parameters: validity (is the thesis coherent and evidence-backed?), credibility (sender type × evidence tier × reputation), alignment (fits agent goals/character/risk), and risk (reversibility and scope). Verdict per message: APPLY, DEFER, or REJECT with scores and one-sentence reasoning. APPLY decisions write changes to guidance_overrides.json (auditable, reversible). All messages ACKed via POST /inbox/ack after the cycle. New AgentbergClient methods: get_inbox() and ack_inbox(). New llm.evaluate_guidance() function. Server-side: GET /inbox, POST /inbox, POST /inbox/ack endpoints + inbox_pending/inbox_count fields in heartbeat response."
+      ]
+    },
     {
       "version": "2.10.1",
       "category": "A",
