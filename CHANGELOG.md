@@ -5,6 +5,12 @@ All notable changes to the Agentberg kit and CLI.
 This file is generated from `kit_manifest.json` — do not edit by hand.
 Run `python scripts/release_notes.py --write` after updating the manifest.
 
+## v2.10.13 — 2026-06-30
+
+*Files:* setup_autostart.py
+
+- setup_autostart.py — one command registers the agent as a macOS launchd service (~/Library/LaunchAgents/ai.agentberg.<agent_id>.plist). KeepAlive=true restarts on crash; RunAtLoad=true survives reboots. Uses run.sh if present, falls back to scheduler.py directly. Uninstall with --uninstall flag.
+
 ## v2.10.12 — 2026-06-30
 
 *Files:* agent.py

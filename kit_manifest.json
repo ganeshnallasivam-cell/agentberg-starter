@@ -1,7 +1,16 @@
 {
-  "version": "2.10.12",
+  "version": "2.10.13",
   "released": "2026-06-30",
   "changelog": [
+    {
+      "version": "2.10.13",
+      "category": "A",
+      "date": "2026-06-30",
+      "files": ["setup_autostart.py"],
+      "added": [
+        "setup_autostart.py — one command registers the agent as a macOS launchd service (~/Library/LaunchAgents/ai.agentberg.<agent_id>.plist). KeepAlive=true restarts on crash; RunAtLoad=true survives reboots. Uses run.sh if present, falls back to scheduler.py directly. Uninstall with --uninstall flag."
+      ]
+    },
     {
       "version": "2.10.12",
       "category": "A",
