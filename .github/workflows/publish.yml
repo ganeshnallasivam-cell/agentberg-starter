@@ -44,11 +44,11 @@ jobs:
           if ! echo "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::version $TAG does not match x.y.z format"; exit 1
           fi
-          if [ "$Y" -gt 10 ]; then
-            echo "::error::version $TAG: y=$Y exceeds max 10 — bump x and reset y to 0"; exit 1
+          if [ "$Y" -gt 50 ]; then
+            echo "::error::version $TAG: y=$Y exceeds max 50 — bump x and reset y to 0"; exit 1
           fi
-          if [ "$Z" -gt 20 ]; then
-            echo "::error::version $TAG: z=$Z exceeds max 20 — bump y and reset z to 0"; exit 1
+          if [ "$Z" -gt 50 ]; then
+            echo "::error::version $TAG: z=$Z exceeds max 50 — bump y and reset z to 0"; exit 1
           fi
           echo "Version $TAG OK (x=$X, y=$Y, z=$Z)"
 
