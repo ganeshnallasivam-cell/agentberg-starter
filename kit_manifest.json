@@ -1,7 +1,16 @@
 {
-  "version": "2.10.11",
+  "version": "2.10.12",
   "released": "2026-06-30",
   "changelog": [
+    {
+      "version": "2.10.12",
+      "category": "A",
+      "date": "2026-06-30",
+      "files": ["agent.py"],
+      "fixed": [
+        "After auto-upgrade, agent sends heartbeat with new kit version then explicitly restarts the scheduler via upgrade._restart_scheduler — works with or without run.sh watchdog. Previous behaviour relied on watchdog only (silent failure if running standalone)."
+      ]
+    },
     {
       "version": "2.10.11",
       "category": "A",

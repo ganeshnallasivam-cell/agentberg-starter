@@ -1198,10 +1198,29 @@ def run_session():
 
     _write_session_state("ok")
 
-    # If Cat 0/A upgrade was applied this session, exit cleanly so run.sh
-    # watchdog restarts the scheduler with the new code in place.
+    # If Cat 0/A upgrade was applied this session, send a heartbeat to signal
+    # the new version is live, then explicitly restart the scheduler so the
+    # new code is loaded. Works with or without the run.sh watchdog.
     if _kit_upgraded:
-        print("[restart] Kit upgraded — exiting so watchdog can restart with new code.")
+        try:
+            _new_ver = None
+            with open(os.path.join(os.path.dirname(__file__), "kit_manifest.json")) as _mf:
+                _new_ver = json.load(_mf).get("version")
+            _agentberg.send_heartbeat(
+                kit_version=_new_ver,
+                universe_size=universe_size,
+                candidates_count_after_filters=0,
+                filter_funnel={},
+            )
+            print(f"[restart] Heartbeat sent (v{_new_ver}) — restarting scheduler.")
+        except Exception as _hbe:
+            print(f"[restart] Heartbeat failed ({_hbe}) — restarting anyway.")
+        try:
+            from pathlib import Path as _Path
+            from upgrade import _restart_scheduler as _do_restart
+            _do_restart(_Path(os.path.dirname(os.path.abspath(__file__))))
+        except Exception as _re:
+            print(f"[restart] Explicit restart failed ({_re}) — watchdog will recover.")
         sys.exit(0)
 
 
