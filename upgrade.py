@@ -229,7 +229,7 @@ def _send_upgrade_report(
 
 # ── main ─────────────────────────────────────────────────────────────────────
 
-def main() -> None:
+def main(no_restart: bool = False) -> None:
     folder = Path.cwd()
     print(f"\n  Agentberg Kit Upgrade")
     print(f"  Folder : {folder}\n")
@@ -346,7 +346,7 @@ def main() -> None:
         print(f"\n  Done. Now at v{latest}.")
         print(f"  Backup saved at: {backup}")
 
-        if applied:
+        if applied and not no_restart:
             print()
             _restart_scheduler(folder)
 
@@ -365,4 +365,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import argparse as _ap
+    _p = _ap.ArgumentParser(description="Agentberg Kit Upgrade")
+    _p.add_argument("--no-restart", action="store_true",
+                    help="Skip scheduler restart (used by auto-upgrade from within the scheduler)")
+    _a = _p.parse_args()
+    main(no_restart=_a.no_restart)

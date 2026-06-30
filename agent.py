@@ -1124,19 +1124,43 @@ def run_session():
     except Exception as e:
         print(f"[8] Knowledge upload skipped ({e})")
 
-    # ── Step 9: Kit version check — mandatory Cat 0/A must be adopted for fleet consistency ──
+    # ── Step 9: Kit version check — Cat 0/A auto-applied; Cat B/C flagged for review ──
+    _kit_upgraded = False
+    _KIT_AUTOUPGRADE_SENTINEL = os.path.join(os.path.dirname(__file__), ".kit_autoupgrade_check")
+    def _autoupgrade_due() -> bool:
+        try:
+            return (time.time() - float(open(_KIT_AUTOUPGRADE_SENTINEL).read().strip())) >= 86400
+        except Exception:
+            return True
     try:
         upd = knowledge.check_kit_update(_agentberg)
         if upd.get("status") == "update_available":
             mandatory = upd.get("mandatory_changes", [])
             optional = upd.get("optional_changes", [])
             print(f"[9] Kit update: v{upd['current']} → v{upd['latest']}")
-            if mandatory:
-                print(f"    !! MANDATORY ({len(mandatory)} change(s) — Cat 0/A — network participation + safe plumbing):")
+            if mandatory and _autoupgrade_due():
+                print(f"    [auto-upgrade] {len(mandatory)} Cat 0/A change(s) — applying now…")
+                try:
+                    import subprocess as _sub
+                    _r = _sub.run(
+                        [sys.executable, os.path.join(os.path.dirname(__file__), "upgrade.py"), "--no-restart"],
+                        capture_output=True, text=True, timeout=180,
+                        cwd=os.path.dirname(__file__) or ".",
+                    )
+                    if _r.returncode == 0:
+                        print(f"    [auto-upgrade] Done → v{upd['latest']}. Restarting after session.")
+                        _kit_upgraded = True
+                        open(_KIT_AUTOUPGRADE_SENTINEL, "w").write(str(time.time()))
+                    else:
+                        print(f"    [auto-upgrade] FAILED — {(_r.stderr or _r.stdout)[:200]}")
+                        print("       Manual fallback: python3 upgrade.py")
+                except Exception as ue:
+                    print(f"    [auto-upgrade] error ({ue}) — run python3 upgrade.py manually")
+            elif mandatory:
+                print(f"    !! MANDATORY ({len(mandatory)} change(s) — Cat 0/A):")
                 for entry in mandatory:
                     for item in entry.get("added", [])[:2]:
                         print(f"       + v{entry.get('version','?')}: {item}")
-                print("       Adopt these now — UPGRADING.md fast path (agentberg upgrade --auto for Cat 0).")
             if optional:
                 print(f"    -- Optional ({len(optional)} change(s) — Cat B/C — review before adopting):")
                 for entry in optional[:3]:
@@ -1173,6 +1197,12 @@ def run_session():
                 print(f"[reflect] Sector signal pushed to network (weak: {len(losing_sectors)}, strong: {len(winning_sectors)})")
 
     _write_session_state("ok")
+
+    # If Cat 0/A upgrade was applied this session, exit cleanly so run.sh
+    # watchdog restarts the scheduler with the new code in place.
+    if _kit_upgraded:
+        print("[restart] Kit upgraded — exiting so watchdog can restart with new code.")
+        sys.exit(0)
 
 
 def check_positions():

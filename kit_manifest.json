@@ -1,7 +1,16 @@
 {
-  "version": "2.10.10",
+  "version": "2.10.11",
   "released": "2026-06-30",
   "changelog": [
+    {
+      "version": "2.10.11",
+      "category": "A",
+      "date": "2026-06-30",
+      "files": ["agent.py", "upgrade.py"],
+      "fixed": [
+        "Cat 0/A kit upgrades now auto-apply once per day — agent detects mandatory changes at Step 9, runs upgrade.py --no-restart in a subprocess, then exits cleanly so the run.sh watchdog restarts with new code. No human action required for plumbing and network-participation changes."
+      ]
+    },
     {
       "version": "2.10.10",
       "category": "A",
