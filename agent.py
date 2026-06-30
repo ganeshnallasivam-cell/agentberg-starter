@@ -931,8 +931,8 @@ def run_session():
                     live_price = c["price"]
                 qty               = max(1, int(size_usd / live_price))
                 side              = "buy" if direction == "bullish" else "sell"
-                stop_price        = round(live_price * (1 - stop_pct),   2) if side == "buy" else None
-                take_profit_price = round(live_price * (1 + target_pct), 2) if side == "buy" else None
+                stop_price        = round(live_price * (1 - stop_pct),   2) if side == "buy" else round(live_price * (1 + stop_pct),   2)
+                take_profit_price = round(live_price * (1 + target_pct), 2) if side == "buy" else round(live_price * (1 - target_pct), 2)
                 order    = _alpaca.submit_order(ticker, qty, side,
                                stop_loss_price=stop_price, take_profit_price=take_profit_price)
                 # Use Alpaca's actual fill price; fall back to pre-order snapshot only if not yet filled
@@ -949,6 +949,7 @@ def run_session():
                 )
                 trade_id = memory.record_trade_open(
                     ticker, sector, entry_price, qty,
+                    trade_type="long_stock" if direction == "bullish" else "short_stock",
                     signal_data=signal, thesis=thesis,
                     expected_pct=expected_pct, stop_pct=stop_pct,
                     network_trade_id=net_open.get("trade_id") if net_open else None,

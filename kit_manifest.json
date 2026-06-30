@@ -1,7 +1,17 @@
 {
-  "version": "2.10.13",
+  "version": "2.10.14",
   "released": "2026-06-30",
   "changelog": [
+    {
+      "version": "2.10.14",
+      "category": "A",
+      "date": "2026-06-30",
+      "files": ["agent.py"],
+      "fixed": [
+        "Short orders now get stop-loss and take-profit bracket orders (entry*(1+stop_pct) and entry*(1-target_pct)). Previously shorts submitted with no brackets — zero protection.",
+        "record_trade_open() now passes trade_type='short_stock' for bearish trades. Previously all shorts were recorded as long_stock in local DB (cosmetic — Alpaca was correct)."
+      ]
+    },
     {
       "version": "2.10.13",
       "category": "A",
