@@ -299,7 +299,14 @@ def main() -> None:
             if top in CAT_B_PROTECT:
                 protected.append(rel)
                 continue
-            src = newdir / rel
+            src = newdir / rel.rstrip("/")
+            if src.is_dir():
+                dest_dir = folder / rel.rstrip("/")
+                if dest_dir.exists():
+                    shutil.rmtree(str(dest_dir))
+                shutil.copytree(str(src), str(dest_dir))
+                applied.append(rel)
+                continue
             if not src.is_file():
                 continue
             cur = folder / rel

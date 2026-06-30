@@ -1,7 +1,16 @@
 {
-  "version": "2.10.7",
+  "version": "2.10.8",
   "released": "2026-06-29",
   "changelog": [
+    {
+      "version": "2.10.8",
+      "category": "A",
+      "date": "2026-06-29",
+      "files": ["upgrade.py"],
+      "fixed": [
+        "upgrade.py now syncs directory entries (e.g. postcar/) correctly — previously is_file() check skipped directories silently, so postcar/ was never applied on upgrade."
+      ]
+    },
     {
       "version": "2.10.7",
       "category": "A",
