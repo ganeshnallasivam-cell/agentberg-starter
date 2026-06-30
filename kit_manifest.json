@@ -4,7 +4,7 @@
   "changelog": [
     {
       "version": "2.10.6",
-      "category": "A",
+      "category": "B",
       "date": "2026-06-29",
       "files": ["agent.py", "alpaca.py"],
       "fixed": [
