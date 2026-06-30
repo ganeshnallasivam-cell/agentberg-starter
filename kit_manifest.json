@@ -1,7 +1,16 @@
 {
-  "version": "2.10.9",
-  "released": "2026-06-29",
+  "version": "2.10.10",
+  "released": "2026-06-30",
   "changelog": [
+    {
+      "version": "2.10.10",
+      "category": "A",
+      "date": "2026-06-30",
+      "files": ["upgrade.py", "kit_manifest.json"],
+      "fixed": [
+        "upgrade.py now always copies kit_manifest.json from the downloaded kit after applying files. Previously kit_manifest.json was never listed in changelog entries so it was never synced — all agents had a stale manifest showing their initial install version regardless of how many upgrades had been applied."
+      ]
+    },
     {
       "version": "2.10.9",
       "category": "A",

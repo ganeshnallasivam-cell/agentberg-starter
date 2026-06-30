@@ -316,6 +316,13 @@ def main() -> None:
             shutil.copy2(str(src), str(cur))
             applied.append(rel)
 
+        # Always sync kit_manifest.json so local version reflects adopted state
+        src_manifest = newdir / "kit_manifest.json"
+        if src_manifest.is_file():
+            shutil.copy2(str(src_manifest), str(folder / "kit_manifest.json"))
+            if "kit_manifest.json" not in applied:
+                applied.append("kit_manifest.json")
+
         adopted["version"] = latest
         _save_adopted(folder, adopted)
 
