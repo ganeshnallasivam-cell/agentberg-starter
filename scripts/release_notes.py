@@ -5,7 +5,7 @@ The `changelog` array in kit_manifest.json is the canonical, structured record o
 what changed in every version. This script renders it into the three version-bearing
 surfaces so they can never drift:
 
-  release_notes.py --write              regenerate CHANGELOG.md + sync __init__.py version
+  release_notes.py --write              regenerate CHANGELOG.md + sync __init__.py + pyproject.toml
   release_notes.py --check              exit 1 if any surface is out of sync (CI guard)
   release_notes.py --version X.Y.Z      print just that version's notes (for GH Release body)
 
@@ -136,9 +136,11 @@ def main() -> int:
         f.write(rendered)
     print(f"Wrote {CHANGELOG}")
 
-    # Also sync agentberg_cli/__init__.py so --write fixes everything in one command.
+    # Sync all version-bearing surfaces so --write is the single atomic operation.
     import re
     version = manifest.get("version", "")
+
+    # agentberg_cli/__init__.py
     init_path = os.path.join(ROOT, "agentberg_cli/__init__.py")
     with open(init_path) as f:
         init_text = f.read()
@@ -147,6 +149,16 @@ def main() -> int:
         with open(init_path, "w") as f:
             f.write(new_init)
         print(f"Synced agentberg_cli/__init__.py to {version}")
+
+    # pyproject.toml
+    pyproject_path = os.path.join(ROOT, "pyproject.toml")
+    with open(pyproject_path) as f:
+        pyproject_text = f.read()
+    new_pyproject = re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{version}"', pyproject_text)
+    if new_pyproject != pyproject_text:
+        with open(pyproject_path, "w") as f:
+            f.write(new_pyproject)
+        print(f"Synced pyproject.toml to {version}")
 
     return 0
 
