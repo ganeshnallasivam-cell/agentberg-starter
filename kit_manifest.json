@@ -1,7 +1,16 @@
 {
-  "version": "2.10.8",
+  "version": "2.10.9",
   "released": "2026-06-29",
   "changelog": [
+    {
+      "version": "2.10.9",
+      "category": "A",
+      "date": "2026-06-29",
+      "files": ["postcar/"],
+      "fixed": [
+        "Force re-sync of postcar/ directory. Agents that upgraded via old upgrade.py (pre-2.10.8) received only postcar_kit.py; sibling modules were silently skipped. This entry triggers a full directory copy via the fixed upgrade.py."
+      ]
+    },
     {
       "version": "2.10.8",
       "category": "A",
