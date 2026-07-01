@@ -423,10 +423,23 @@ def cmd_init(args) -> None:
     print("\nNext steps:")
     print(f"  cd {target} && pip install -r requirements.txt")
     print("  agentberg run        # one session   |   agentberg start   # live scheduler")
+    print("  agentberg autostart  # supervise it forever — restarts on crash, survives reboot/logout")
 
 
 def cmd_run(args) -> None:
     subprocess.run([sys.executable, "agent.py"], cwd=_folder(args))
+
+
+def cmd_autostart(args) -> None:
+    """Register (or unregister) the scheduler as an OS-level supervised service.
+
+    `agentberg start` only supervises while its own terminal stays open. This
+    installs a real launchd (macOS) / systemd --user (Linux) service so the
+    scheduler restarts on crash and survives reboot/logout too.
+    """
+    folder = _folder(args)
+    script_args = ["--uninstall"] if args.uninstall else []
+    subprocess.run([sys.executable, "setup_autostart.py", *script_args], cwd=folder)
 
 
 def cmd_start(args) -> None:
@@ -666,6 +679,11 @@ def main(argv=None) -> None:
         sp = sub.add_parser(name, help=help_)
         sp.add_argument("--dir", help="trader folder (default: the one from init)")
         sp.set_defaults(func=fn)
+
+    pas = sub.add_parser("autostart", help="install/uninstall the OS-level supervised service (survives reboot/logout)")
+    pas.add_argument("--dir", help="trader folder (default: the one from init)")
+    pas.add_argument("--uninstall", action="store_true", help="remove the supervised service")
+    pas.set_defaults(func=cmd_autostart)
 
     pu = sub.add_parser("upgrade", help="upgrade the kit; --auto applies Cat 0/A to untouched files")
     pu.add_argument("--dir", help="trader folder (default: the one from init)")

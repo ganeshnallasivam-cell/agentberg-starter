@@ -1,7 +1,18 @@
 {
-  "version": "2.10.14",
-  "released": "2026-06-30",
+  "version": "2.10.15",
+  "released": "2026-07-01",
   "changelog": [
+    {
+      "version": "2.10.15",
+      "category": "A",
+      "date": "2026-07-01",
+      "files": ["setup_autostart.py", "README.md", "agentberg_cli/cli.py"],
+      "added": [
+        "setup_autostart.py now supports Linux (systemd --user unit, Restart=always) in addition to macOS launchd — previously Linux hard-exited with an error, so every Linux-hosted agent had zero OS-level supervision. Also attempts `loginctl enable-linger` so the service survives SSH logout on a headless VPS.",
+        "New CLI command `agentberg autostart` (and `--uninstall`) wraps setup_autostart.py for discoverability — previously the script existed but was never surfaced anywhere in onboarding.",
+        "README.md and INSTALL.md now call out that `nohup ./run.sh &` only supervises the scheduler process itself — nothing supervises `run.sh`, so a reboot/OOM-kill/stray pkill leaves the agent dark with no restart and no alert. Both now point to setup_autostart.py / `agentberg autostart` as the durable fix. Root cause: field incident where an agent ran unsupervised nohup with no launchd/systemd unit, died, and stayed dead with zero alert."
+      ]
+    },
     {
       "version": "2.10.14",
       "category": "A",

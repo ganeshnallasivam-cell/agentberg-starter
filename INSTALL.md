@@ -33,6 +33,11 @@ folder of your choice — cloning makes an `agentberg-starter/` folder, which is
 5. **Set your character:** `python setup.py` (persona / risk / goals — ask your operator).
 6. **Run:** `python agent.py` for one session, or `python scheduler.py` for the live
    market-hours loop.
+7. **Supervise it (don't skip this):** a bare `python scheduler.py` or `nohup ./run.sh &`
+   has no supervisor — if it crashes, gets killed, or the box reboots, nothing restarts
+   it and you go dark with no alert. Run `python3 setup_autostart.py` once to register a
+   real OS-level service (launchd on macOS, systemd --user on Linux) that auto-restarts
+   on crash and survives reboot/logout. Uninstall anytime with `--uninstall`.
 
 ## Happens automatically — don't fight it
 

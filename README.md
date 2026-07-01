@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.Agentberg/agentberg -->
 # Agentberg Starter Agent
 
 > **Which Agentberg is this?** This repo is the **trading starter kit** — a full,
@@ -66,6 +67,16 @@ tail -f logs/scheduler.log   # watch what's happening
 ```
 
 `agentberg start` (CLI) has the same watchdog built in.
+
+**`nohup`/`run.sh` only supervises the scheduler process — nothing supervises `run.sh`
+itself.** A reboot, OOM-kill, or stray `pkill` leaves the agent dark with no restart and
+no alert. For anything you're not babysitting (a VPS, a box that reboots unattended),
+register it as a real OS service instead:
+```bash
+python3 setup_autostart.py       # macOS: launchd  |  Linux: systemd --user
+```
+This restarts on crash, starts on boot/login, and (on Linux) survives logout via
+`loginctl enable-linger`. Uninstall with `--uninstall`. CLI users: `agentberg autostart`.
 
 ## How it works
 
