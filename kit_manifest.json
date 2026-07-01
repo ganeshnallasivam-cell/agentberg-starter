@@ -1,7 +1,22 @@
 {
-  "version": "2.10.16",
+  "version": "2.10.17",
   "released": "2026-07-01",
   "changelog": [
+    {
+      "version": "2.10.17",
+      "category": "A",
+      "date": "2026-07-01",
+      "files": ["memory.py", "agent.py", "scheduler.py", "migrations.py"],
+      "added": [
+        "New eod_reconcile() — once daily, right after market close, corrects EVERY broker-verifiable field on trades opened/closed in a rolling 30-day window (not just today) against Alpaca's confirmed order fills: entry_price, qty, opened_at (real fill time), entry_commission on the entry side; exit_price, pnl, pnl_pct, closed_at (real fill time), exit_commission on the exit side. Rolling window means a day the job never ran (agent down, network outage) still gets caught up on the next run instead of that drift going uncorrected forever. Uses the order_id/exit_order_id already stored on the trade — already-correct trades cost one cheap get_order() lookup and no write. All 3 order-submission paths (equity, single option, spread) and all 3 close paths (monitor stop/TP, spread close, reconcile_ledger) now capture the broker's order id and, where available, its filled_at/commission — previously entry_price/qty/timestamps were recorded from the order-SUBMIT response (a pre-fill estimate) and never corrected afterward if the fill posted later or at a different price.",
+        "Found and fixed while wiring this: the equity entry path (submit_order, the most common trade type) never stored order_id on the trade at all — eod_reconcile's entry correction would have silently no-op'd for it. The premium_buyer (single option) path also never attempted Alpaca's filled_avg_price, recording only the pre-trade limit_price estimate, forever.",
+        "New trades columns: exit_order_id, entry_commission, exit_commission — added to migrations.py's _MIGRATIONS list (the durable migration path; memory.py's own ALTER list is NOT sufficient, see fix below) and to memory.py's init_db() ALTER list.",
+        "Wired into scheduler.py's main loop via the existing once-per-day `_should_run_session`/`_mark_ran` idiom — fires the first time the loop observes market-closed after a trading day, no new schedule surface."
+      ],
+      "fixed": [
+        "Pre-existing bug, found while testing this change end-to-end (not introduced by it): run_session() called migrations.run() BEFORE memory.init_db(). migrations.run() no-ops if agent.db doesn't exist yet ('no db yet — init_db() will create the full schema' — false: init_db()'s own CREATE TABLE/ALTER list never included entry_regime, entry_beta, entry_iv, entry_dte, network_aligned, network_signal, macro_window, candidates_ranked, or rank_position, only migrations.py's list did). Net effect: a genuinely fresh agent.db crashed on its very first trade with 'table trades has no column named entry_regime'. Fixed by swapping the call order — init_db() (creates the table) now always runs before migrations.run() (extends it)."
+      ]
+    },
     {
       "version": "2.10.16",
       "category": "0",

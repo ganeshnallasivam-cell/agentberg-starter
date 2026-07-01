@@ -201,6 +201,15 @@ def _main_loop() -> None:
                 run_monitor()
                 log.debug("[monitor] Position check done")
 
+            if not _is_market_hours() and _should_run_session("eod_reconcile", last_ran):
+                log.info("[eod] Reconciling ledger against broker fills...")
+                try:
+                    from agent import eod_reconcile
+                    eod_reconcile()
+                except Exception as e:
+                    log.error(f"[eod] reconcile failed: {e}")
+                _mark_ran("eod_reconcile", last_ran)
+
             if _is_market_hours():
                 time.sleep(MONITOR_INTERVAL_SECS)
             else:

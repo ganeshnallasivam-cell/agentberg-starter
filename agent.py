@@ -237,6 +237,9 @@ def reconcile_ledger():
         memory.record_trade_close(
             t["id"], exit_price=exit_price, pnl=pnl, pnl_pct=pnl_pct,
             exit_reason="reconciled_broker",
+            exit_order_id=fill.get("id") if fill else None,
+            closed_at=fill.get("filled_at") if fill else None,
+            exit_commission=float(fill.get("commission") or 0) if fill else 0.0,
         )
         if t.get("network_trade_id"):
             _agentberg.close_trade(t["network_trade_id"], pnl=pnl, pnl_pct=pnl_pct,
@@ -248,13 +251,89 @@ def reconcile_ledger():
         print(f"[reconcile] Voided {voided} phantom trade(s) — entry order never filled")
 
 
+def eod_reconcile(days: int = 30):
+    """
+    End-of-day: correct every broker-verifiable field against Alpaca's confirmed
+    fills — entry AND exit side, not just price/qty, across a rolling window
+    (default 30 days), not just today.
+
+    record_trade_open()/record_trade_close() record price, qty, and timestamps
+    from the order-SUBMIT response — if the fill hadn't posted yet, those are
+    pre-trade/pre-fill estimates, never corrected until now. reconcile_ledger()
+    (every session) already fixes trades closed server-side while the app was
+    down; this fixes drift on trades the app itself opened/closed, using the
+    order_id / exit_order_id already stored at entry/exit:
+      - entry_price, qty, opened_at (real fill time), entry_commission
+      - exit_price, pnl, pnl_pct, closed_at (real fill time), exit_commission
+    The window is rolling, not "today only", so a day the reconcile job never
+    ran (agent down, network outage) still gets caught up and corrected on the
+    next run instead of that drift going uncorrected forever. Called once per
+    day, right after market close (scheduler.py), already-tallied trades are
+    cheap no-ops (single get_order() lookup, no write unless drifted).
+    """
+    trades = memory.get_trades_opened_since(days)
+    entry_fixed = exit_fixed = 0
+    for t in trades:
+        # ── Entry side ───────────────────────────────────────────────────────
+        if t.get("order_id"):
+            order = _alpaca.get_order(t["order_id"])
+            if order and order.get("status") == "filled":
+                broker_price = float(order.get("filled_avg_price") or 0)
+                broker_qty   = int(float(order.get("filled_qty") or 0))
+                local_price  = t.get("entry_price") or 0
+                local_qty    = t.get("qty") or 0
+                if broker_price and broker_qty and (
+                    abs(broker_price - local_price) > 0.01 or broker_qty != local_qty
+                ):
+                    memory.correct_trade_entry(
+                        t["id"], broker_price, broker_qty,
+                        opened_at=order.get("filled_at") or t.get("opened_at"),
+                        entry_commission=float(order.get("commission") or 0),
+                    )
+                    print(f"[eod] {t['symbol']}: corrected entry ${local_price:.2f}×{local_qty} "
+                          f"→ ${broker_price:.2f}×{broker_qty} (broker truth)")
+                    entry_fixed += 1
+
+        # ── Exit side ────────────────────────────────────────────────────────
+        if t.get("status") == "closed" and t.get("exit_order_id"):
+            order = _alpaca.get_order(t["exit_order_id"])
+            if order and order.get("status") == "filled":
+                broker_exit = float(order.get("filled_avg_price") or 0)
+                local_exit  = t.get("exit_price") or 0
+                if broker_exit and abs(broker_exit - local_exit) > 0.01:
+                    entry = t.get("entry_price") or 0
+                    qty   = t.get("qty") or 0
+                    mult  = t.get("multiplier") or 1
+                    pnl     = (broker_exit - entry) * qty * mult
+                    pnl_pct = (broker_exit - entry) / entry if entry else 0.0
+                    memory.correct_trade_exit(
+                        t["id"], broker_exit, pnl, pnl_pct,
+                        closed_at=order.get("filled_at") or t.get("closed_at"),
+                        exit_commission=float(order.get("commission") or 0),
+                    )
+                    print(f"[eod] {t['symbol']}: corrected exit ${local_exit:.2f} "
+                          f"→ ${broker_exit:.2f} (broker truth)")
+                    exit_fixed += 1
+
+    if entry_fixed or exit_fixed:
+        print(f"[eod] Corrected {entry_fixed} entr{'y' if entry_fixed == 1 else 'ies'}, "
+              f"{exit_fixed} exit(s) against broker")
+    else:
+        print("[eod] Ledger tallies with broker — no drift found")
+
+
 def run_session():
     """
     Full trading cycle. Call once at market open and once at close.
     """
     _write_session_state("in_progress")
-    migrations.run()
+    # init_db() first: on a truly fresh install there's no agent.db yet, so
+    # migrations.run() would no-op (it only ALTERs an existing table) and
+    # init_db()'s own CREATE TABLE doesn't carry every column memory.py's
+    # functions expect (e.g. entry_regime) — this order guarantees the table
+    # exists before migrations tries to extend it.
     memory.init_db()
+    migrations.run()
     _phone_home()
     mode = cfg.STRATEGY_MODE
     print(f"\n[agent] {datetime.datetime.now():%Y-%m-%d %H:%M} | ID: {cfg.AGENT_ID} | Mode: {mode}")
@@ -952,11 +1031,13 @@ def run_session():
                     trade_type="long_stock" if direction == "bullish" else "short_stock",
                     signal_data=signal, thesis=thesis,
                     expected_pct=expected_pct, stop_pct=stop_pct,
+                    order_id=order.get("id"),
                     network_trade_id=net_open.get("trade_id") if net_open else None,
                     entry_regime=regime, entry_beta=c.get("beta"),
                     network_aligned=bool(trade_finding_ids),
                     network_signal=direction, macro_window=_session_macro_window,
                     candidates_ranked=_candidates_total, rank_position=_rank_pos,
+                    entry_commission=float(order.get("commission") or 0),
                 )
                 print(f"    ORDER {ticker}: {side} ×{qty} @ ~${live_price:.2f}  "
                       f"stop=${stop_price or 'none'}  tp=${take_profit_price or 'none'}  "
@@ -1001,11 +1082,13 @@ def run_session():
                 continue
             try:
                 order    = _alpaca.submit_option_single(contract["symbol"], qty=1, side="buy", limit_price=limit_price)
+                # Use Alpaca's actual fill price; fall back to the limit price only if not yet filled
+                entry_price = float(order.get("filled_avg_price") or 0) or limit_price
                 net_open = _agentberg.open_trade(
                     ticker=ticker, trade_type=f"long_{option_type}",
                     entry_date=datetime.date.today().isoformat(),
                     finding_ids=trade_finding_ids,
-                    sector=sector, entry_price=limit_price,
+                    sector=sector, entry_price=entry_price,
                     execution_env="paper" if cfg.ALPACA_PAPER else "live",
                     entry_regime=regime, entry_beta=c.get("beta"),
                     entry_iv=iv_rank, entry_dte=dte,
@@ -1013,19 +1096,20 @@ def run_session():
                     network_signal=direction, macro_window=_session_macro_window,
                 )
                 trade_id = memory.record_trade_open(
-                    ticker, sector, limit_price, 1, trade_type=f"long_{option_type}",
+                    ticker, sector, entry_price, 1, trade_type=f"long_{option_type}",
                     signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct,
-                    long_symbol=contract["symbol"],
+                    long_symbol=contract["symbol"], order_id=order.get("id"),
                     network_trade_id=net_open.get("trade_id") if net_open else None,
                     entry_regime=regime, entry_beta=c.get("beta"),
                     entry_iv=iv_rank, entry_dte=dte,
                     network_aligned=bool(trade_finding_ids),
                     network_signal=direction, macro_window=_session_macro_window,
                     candidates_ranked=_candidates_total, rank_position=_rank_pos,
+                    entry_commission=float(order.get("commission") or 0),
                 )
                 print(f"    ORDER {ticker} {option_type.upper()} {contract['expiration_date']} "
-                      f"${contract['strike_price']} δ={delta:.2f} @ ${limit_price:.2f}")
-                executed.append({**c, "symbol": contract["symbol"], "premium": limit_price, "memory_id": trade_id})
+                      f"${contract['strike_price']} δ={delta:.2f} @ ${entry_price:.2f}")
+                executed.append({**c, "symbol": contract["symbol"], "premium": entry_price, "memory_id": trade_id})
                 traded_this_session.add(ticker)
                 open_count   += 1
                 _slots_opened += 1
@@ -1066,18 +1150,20 @@ def run_session():
                 continue
             try:
                 order    = _alpaca.submit_option_spread(buy_leg["symbol"], sell_leg["symbol"], qty=1, net_debit=net_debit)
+                # Use Alpaca's actual net fill price; fall back to the target debit only if not yet filled
+                entry_price = float(order.get("filled_avg_price") or 0) or net_debit
                 net_open = _agentberg.open_trade(
                     ticker=ticker, trade_type="spread",
                     entry_date=datetime.date.today().isoformat(),
                     finding_ids=trade_finding_ids,
-                    sector=sector, entry_price=net_debit,
+                    sector=sector, entry_price=entry_price,
                     execution_env="paper" if cfg.ALPACA_PAPER else "live",
                     entry_regime=regime, entry_beta=c.get("beta"),
                     entry_dte=dte, network_aligned=bool(trade_finding_ids),
                     network_signal=direction, macro_window=_session_macro_window,
                 )
                 trade_id = memory.record_trade_open(
-                    ticker, sector, net_debit, 1, trade_type=f"{option_type}_spread",
+                    ticker, sector, entry_price, 1, trade_type=f"{option_type}_spread",
                     signal_data=signal, thesis=thesis, expected_pct=expected_pct, stop_pct=stop_pct,
                     long_symbol=buy_leg["symbol"], short_symbol=sell_leg["symbol"],
                     multiplier=100, order_id=order.get("id"),
@@ -1086,6 +1172,7 @@ def run_session():
                     entry_dte=dte, network_aligned=bool(trade_finding_ids),
                     network_signal=direction, macro_window=_session_macro_window,
                     candidates_ranked=_candidates_total, rank_position=_rank_pos,
+                    entry_commission=float(order.get("commission") or 0),
                 )
                 print(f"    SPREAD {ticker} {option_type.upper()} "
                       f"${float(buy_leg['strike_price']):.0f}/${float(sell_leg['strike_price']):.0f} debit=${net_debit:.2f}")
@@ -1276,10 +1363,12 @@ def check_positions():
         print(f"[monitor] {reason.upper()} SPREAD {trade['symbol']} ({long_sym}/{short_sym}): "
               f"net {net_pct:.1%} — closing both legs")
         try:
-            _alpaca.submit_option_spread_close(long_sym, short_sym, qty=qty, net_credit=net_credit)
+            close_order = _alpaca.submit_option_spread_close(long_sym, short_sym, qty=qty, net_credit=net_credit)
             exit_price = round((trade.get("entry_price") or 0) + net_pl_dollars / (mult * qty), 2)
             memory.record_trade_close(trade["id"], exit_price=exit_price, pnl=net_pl_dollars,
-                                      pnl_pct=net_pct, exit_reason=reason)
+                                      pnl_pct=net_pct, exit_reason=reason,
+                                      exit_order_id=close_order.get("id"),
+                                      exit_commission=float(close_order.get("commission") or 0))
             print(f"    [journal] {trade['symbol']} closed {net_pct:+.1%} ({reason}) — review with `python journal.py`")
             if trade.get("network_trade_id"):
                 _agentberg.close_trade(trade["network_trade_id"], pnl=net_pl_dollars, pnl_pct=net_pct,
@@ -1475,7 +1564,12 @@ def _record_close(symbol: str, reason: str, pnl_pct: float, close_order: dict | 
     if not exit_price and entry_price:
         exit_price = round(entry_price * (1 + pnl_pct), 4)
     pnl_dollars = (exit_price - entry_price) * qty * mult if (exit_price and entry_price) else entry_price * qty * mult * pnl_pct
-    memory.record_trade_close(trade["id"], exit_price=exit_price, pnl=pnl_dollars, pnl_pct=pnl_pct, exit_reason=reason)
+    memory.record_trade_close(
+        trade["id"], exit_price=exit_price, pnl=pnl_dollars, pnl_pct=pnl_pct, exit_reason=reason,
+        exit_order_id=close_order.get("id") if close_order else None,
+        closed_at=close_order.get("filled_at") if close_order else None,
+        exit_commission=float(close_order.get("commission") or 0) if close_order else 0.0,
+    )
     print(f"    [journal] {symbol} closed {pnl_pct:+.1%} @ ${exit_price:.2f} ({reason})")
     if trade.get("network_trade_id"):
         _agentberg.close_trade(trade["network_trade_id"], pnl=pnl_dollars, pnl_pct=pnl_pct,

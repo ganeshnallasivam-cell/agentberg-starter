@@ -1,10 +1,11 @@
 """
 migrations.py — Schema migrations for agent.db.
 
-Called from agent.py before memory.init_db(), so the schema is always current
-even if memory.py was skipped during a kit upgrade (Category C file). This file
-has no kit imports — raw sqlite3 only, so it runs regardless of what else was
-or wasn't upgraded.
+Called from agent.py AFTER memory.init_db() (init_db creates the table if
+it doesn't exist yet; this only ALTERs an existing one — it can't create
+one). This keeps the schema current even if memory.py's own base schema was
+skipped during a kit upgrade (Category C file). This file has no kit imports
+— raw sqlite3 only, so it runs regardless of what else was or wasn't upgraded.
 """
 import sqlite3
 from pathlib import Path
@@ -37,13 +38,24 @@ _MIGRATIONS = [
     ("macro_window",      "INTEGER DEFAULT 0"),
     ("candidates_ranked", "INTEGER"),
     ("rank_position",     "INTEGER"),
+    # v2.10.17 — EOD broker reconciliation (entry+exit price/qty/timestamp/commission)
+    ("exit_order_id",    "TEXT"),
+    ("entry_commission", "REAL DEFAULT 0"),
+    ("exit_commission",  "REAL DEFAULT 0"),
 ]
 
 
 def run() -> None:
-    """Apply all pending column migrations. Safe to call every startup."""
+    """Apply all pending column migrations. Safe to call every startup.
+
+    Call memory.init_db() first — this only ALTERs an existing table, it
+    can't create one. init_db()'s own schema doesn't cover every column in
+    _MIGRATIONS (e.g. entry_regime), so calling this before init_db() on a
+    fresh install leaves those columns missing and the first trade write
+    crashes with "no column named ...".
+    """
     if not DB_PATH.exists():
-        return  # no db yet — memory.init_db() will create the full schema
+        return  # defensive guard — should be unreachable if init_db() ran first
     conn = sqlite3.connect(DB_PATH)
     try:
         for col, typ in _MIGRATIONS:

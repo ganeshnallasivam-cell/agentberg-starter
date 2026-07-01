@@ -115,7 +115,14 @@ def init_db():
                          # network trade id — stored at open, used to call close_trade() for auto-votes.
                          ("network_trade_id", "TEXT"),
                          # trailing stop — highest price seen since entry; updated in monitor
-                         ("high_water_mark", "REAL")]:
+                         ("high_water_mark", "REAL"),
+                         # broker's closing order id — captured whenever a close order is
+                         # submitted, so eod_reconcile() can verify the exit fill later.
+                         ("exit_order_id", "TEXT"),
+                         # broker-reported commission, entry and exit side (0 for most
+                         # equity/options accounts, but not assumed — read from the order).
+                         ("entry_commission", "REAL DEFAULT 0"),
+                         ("exit_commission", "REAL DEFAULT 0")]:
             try:
                 conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {typ}")
             except sqlite3.OperationalError:
@@ -148,6 +155,7 @@ def record_trade_open(
     macro_window: bool = False,
     candidates_ranked: int | None = None,
     rank_position: int | None = None,
+    entry_commission: float = 0.0,
 ) -> int:
     """
     Open a trade. Pass signal_data to record the entry signals, and the trade
@@ -169,16 +177,16 @@ def record_trade_open(
                 long_symbol, short_symbol, multiplier, order_id, network_trade_id,
                 entry_regime, entry_beta, entry_iv, entry_dte,
                 network_aligned, network_signal, macro_window,
-                candidates_ranked, rank_position)
+                candidates_ranked, rank_position, entry_commission)
                VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                       ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, sector, trade_type, entry_price, qty, today, now,
              json.dumps(signal_data) if signal_data else None,
              thesis, expected_pct, stop_pct,
              long_symbol or symbol, short_symbol, multiplier, order_id, network_trade_id,
              entry_regime, entry_beta, entry_iv, entry_dte,
              1 if network_aligned else 0, network_signal, 1 if macro_window else 0,
-             candidates_ranked, rank_position),
+             candidates_ranked, rank_position, entry_commission),
         )
         return cur.lastrowid
 
@@ -195,8 +203,18 @@ def _variance_reason(exit_reason: str, pnl_pct: float, expected_pct: float | Non
 
 
 def record_trade_close(trade_id: int, exit_price: float, pnl: float,
-                       pnl_pct: float, exit_reason: str):
-    now = datetime.datetime.now().isoformat(timespec="seconds")
+                       pnl_pct: float, exit_reason: str,
+                       exit_order_id: str | None = None,
+                       closed_at: str | None = None,
+                       exit_commission: float = 0.0):
+    """
+    closed_at defaults to now (submit-time estimate) but should be overridden with
+    the broker's own filled_at whenever the caller has it (reconcile_ledger,
+    _record_close) — that's the real close time, not "when we happened to notice".
+    exit_order_id is stored so eod_reconcile() can re-verify the fill later even
+    when it wasn't confirmed synchronously at submit time.
+    """
+    now = closed_at or datetime.datetime.now().isoformat(timespec="seconds")
     with _conn() as conn:
         row = conn.execute("SELECT expected_pct FROM trades WHERE id=?", (trade_id,)).fetchone()
         expected = row["expected_pct"] if row else None
@@ -206,8 +224,10 @@ def record_trade_close(trade_id: int, exit_price: float, pnl: float,
         variance_reason = _variance_reason(exit_reason, pnl_pct, expected)
         conn.execute(
             """UPDATE trades SET exit_price=?, pnl=?, pnl_pct=?, exit_reason=?,
-               status='closed', closed_at=?, variance_pct=?, variance_reason=? WHERE id=?""",
-            (exit_price, pnl, pnl_pct, exit_reason, now, variance_pct, variance_reason, trade_id),
+               status='closed', closed_at=?, variance_pct=?, variance_reason=?,
+               exit_order_id=?, exit_commission=? WHERE id=?""",
+            (exit_price, pnl, pnl_pct, exit_reason, now, variance_pct, variance_reason,
+             exit_order_id, exit_commission, trade_id),
         )
 
 
@@ -420,6 +440,67 @@ def update_high_water_mark(trade_id: int, price: float) -> None:
     """Record the highest price seen since entry. Called by the position monitor each cycle."""
     with _conn() as conn:
         conn.execute("UPDATE trades SET high_water_mark=? WHERE id=?", (price, trade_id))
+
+
+def get_trades_opened_since(days: int = 30) -> list[dict]:
+    """Every trade opened in the last N days (open or already closed), for EOD
+    broker reconciliation. Rolling window, not just today — so a missed day
+    (agent down, network outage) still self-heals on the next run instead of
+    that day's drift going uncorrected forever."""
+    cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM trades WHERE session_date>=? AND status != 'void'", (cutoff,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def correct_trade_entry(trade_id: int, entry_price: float, qty: int,
+                        opened_at: str | None = None,
+                        entry_commission: float = 0.0) -> None:
+    """EOD correction: overwrite entry_price/qty/opened_at/commission with
+    Alpaca's confirmed fill.
+
+    record_trade_open() records these from the order-submit response — if the
+    fill hadn't posted yet, that's a pre-trade snapshot, not broker truth.
+    This is the only path that corrects it after the fact.
+    """
+    with _conn() as conn:
+        if opened_at:
+            conn.execute(
+                "UPDATE trades SET entry_price=?, qty=?, opened_at=?, entry_commission=? WHERE id=?",
+                (entry_price, qty, opened_at, entry_commission, trade_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE trades SET entry_price=?, qty=?, entry_commission=? WHERE id=?",
+                (entry_price, qty, entry_commission, trade_id),
+            )
+
+
+def correct_trade_exit(trade_id: int, exit_price: float, pnl: float, pnl_pct: float,
+                       closed_at: str | None = None,
+                       exit_commission: float = 0.0) -> None:
+    """EOD correction: overwrite exit_price/pnl/pnl_pct/closed_at/commission with
+    Alpaca's confirmed closing fill (see correct_trade_entry — same rationale,
+    exit side). Recomputes variance_pct the same way record_trade_close() does,
+    so a corrected exit still keeps the journal's variance honest."""
+    with _conn() as conn:
+        row = conn.execute("SELECT expected_pct FROM trades WHERE id=?", (trade_id,)).fetchone()
+        expected = row["expected_pct"] if row else None
+        variance_pct = round(pnl_pct - expected, 4) if expected is not None else None
+        if closed_at:
+            conn.execute(
+                """UPDATE trades SET exit_price=?, pnl=?, pnl_pct=?, closed_at=?,
+                   exit_commission=?, variance_pct=? WHERE id=?""",
+                (exit_price, pnl, pnl_pct, closed_at, exit_commission, variance_pct, trade_id),
+            )
+        else:
+            conn.execute(
+                """UPDATE trades SET exit_price=?, pnl=?, pnl_pct=?,
+                   exit_commission=?, variance_pct=? WHERE id=?""",
+                (exit_price, pnl, pnl_pct, exit_commission, variance_pct, trade_id),
+            )
 
 
 def get_open_trades() -> list[dict]:
