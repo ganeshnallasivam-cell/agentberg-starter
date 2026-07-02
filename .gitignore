@@ -20,3 +20,6 @@ dist/
 .claude/
 tests/
 .agentberg_adopted.json
+
+# PostCar sidecar state -- agent key + cache files, never commit
+.postcar*
