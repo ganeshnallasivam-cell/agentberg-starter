@@ -1,7 +1,17 @@
 {
-  "version": "2.10.18",
-  "released": "2026-07-01",
+  "version": "2.10.19",
+  "released": "2026-07-02",
   "changelog": [
+    {
+      "version": "2.10.19",
+      "category": "A",
+      "date": "2026-07-02",
+      "files": ["agent.py"],
+      "fixed": [
+        "close_trade() was never sent exit_date at any of its 3 call sites (broker-reconciliation exits, option-spread exits, single-position exits) -- every closed trade published to Agentberg had exit_date permanently null server-side, confirmed across two independently-running agents with 100% reproduction. Fixed by passing exit_date=datetime.date.today().isoformat() at all 3 sites.",
+        "Separately observed (not fixed here -- flagging for follow-up): a subset of closes never reach 'closed' status on Agentberg at all even though network_trade_id was correctly stored locally and the local close succeeded with real pnl. No client-side exception was ever logged for these (grepped every log file for the exact '[agentberg] close_trade failed' string -- zero hits), so either the PUT never fired or the server never received it. There is currently no retry or reconciliation pass to catch this class of failure. Needs a local pending-sync queue (mirroring existing patterns like pending_eval.json) that retries close_trade for any local trade whose network_trade_id still shows open on the next session."
+      ]
+    },
     {
       "version": "2.10.18",
       "category": "A",

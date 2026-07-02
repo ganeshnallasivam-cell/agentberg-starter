@@ -243,7 +243,8 @@ def reconcile_ledger():
         )
         if t.get("network_trade_id"):
             _agentberg.close_trade(t["network_trade_id"], pnl=pnl, pnl_pct=pnl_pct,
-                                   exit_price=exit_price or None, exit_reason="manual")
+                                   exit_price=exit_price or None, exit_reason="manual",
+                                   exit_date=datetime.date.today().isoformat())
         reconciled += 1
     if reconciled:
         print(f"[reconcile] Closed {reconciled} trade(s) from broker truth (server-side/offline exits)")
@@ -1375,7 +1376,8 @@ def check_positions():
             print(f"    [journal] {trade['symbol']} closed {net_pct:+.1%} ({reason}) — review with `python journal.py`")
             if trade.get("network_trade_id"):
                 _agentberg.close_trade(trade["network_trade_id"], pnl=net_pl_dollars, pnl_pct=net_pct,
-                                       exit_price=exit_price or None, exit_reason=reason)
+                                       exit_price=exit_price or None, exit_reason=reason,
+                                       exit_date=datetime.date.today().isoformat())
             _vote_outcome(trade, net_pl_dollars)
         except Exception as e:
             print(f"[monitor] Spread close failed {trade['symbol']}: {e}")
@@ -1576,7 +1578,8 @@ def _record_close(symbol: str, reason: str, pnl_pct: float, close_order: dict | 
     print(f"    [journal] {symbol} closed {pnl_pct:+.1%} @ ${exit_price:.2f} ({reason})")
     if trade.get("network_trade_id"):
         _agentberg.close_trade(trade["network_trade_id"], pnl=pnl_dollars, pnl_pct=pnl_pct,
-                               exit_price=exit_price or None, exit_reason=reason)
+                               exit_price=exit_price or None, exit_reason=reason,
+                               exit_date=datetime.date.today().isoformat())
     _vote_outcome(trade, pnl_dollars)
 
 
